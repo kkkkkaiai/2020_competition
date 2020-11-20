@@ -1,5 +1,8 @@
 int32 method 
 
 ---
+
+bool is_success
+int32[] grip_method
 image_proc_msgs/ImageProcMsg[] object
-  
+int32[] classify
