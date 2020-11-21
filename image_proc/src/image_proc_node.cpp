@@ -524,7 +524,7 @@ public:
 
 		vector<float> p(4); //012--xyz
 
-		p[2] = depth / camera_factor * 0.001;
+		p[2] = depth / camera_factor;
 		p[0] = (ctrpointpx[ll].x + float(x_offset) - camera_cx_wrist) * p[2] / camera_fx_wrist;
 		p[1] = (ctrpointpx[ll].y + float(y_offset) - camera_cy_wrist) * p[2] / camera_fy_wrist;
 		p[3] = angle_set[ll];

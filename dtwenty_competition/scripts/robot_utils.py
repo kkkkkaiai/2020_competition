@@ -96,7 +96,6 @@ class RobotInit:
         ik_request = SolvePositionIKRequest()
         if head_camera == 'yes':
             position = self.camera_to_base_tf(position)
-        print(position)
         position += offset
         if tag == 'solid':
             position[2] = -0.037
@@ -113,7 +112,7 @@ class RobotInit:
             rospy.logerr("Service request failed: %r" % (error_message,))
             sys.exit("ERROR - baxter_ik_move - Failed to append pose")
         if ik_response.isValid[0]:
-            print("PASS: Valid joint configuration found")
+            print("PASS: Valid joint configuration found", position)
             # convert response to joint position control dictionary
             limb_joints = dict(zip(ik_response.joints[0].name, ik_response.joints[0].position))
             # print(limb_joints)
@@ -206,8 +205,8 @@ class RobotInit:
         limb.move_to_joint_positions(joint_command)
 
     def cal_gripper_theta(self, theta):
-        print 0.23-((theta/180)*3.1415926-3.1415926/2)
-        return 0.23-((theta/180)*3.1415926-3.1415926/2)
+        #print 0.22-((theta/180)*3.1415926-3.1415926/2)
+        return 0.225-((theta/180)*3.1415926-3.1415926/2)
         # return 1.8642-0.017*theta
 
 
