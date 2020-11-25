@@ -14,6 +14,7 @@ import time
 import threading
 # import std_srvs.srv
 from moveit_commander import conversions
+from geometry_msgs.msg import PoseStamped, Pose
 from std_msgs.msg import Header
 # from std_msgs.msg import Bool
 # from std_msgs.msg import String
@@ -52,8 +53,8 @@ class RobotInit:
 
         self.left = baxter_interface.Gripper('left', CHECK_VERSION)
         self.right = baxter_interface.Gripper('right', CHECK_VERSION)
-        self.left.set_dead_band(2.5)
-        self.right.set_dead_band(2.5)
+        self.left.set_dead_band(0.1)
+        self.right.set_dead_band(0.1)
         self.limb_right = baxter_interface.Limb('right')
         self.limb_left = baxter_interface.Limb('left')
 
@@ -89,20 +90,25 @@ class RobotInit:
         base_tf = np.dot(self.translation_matrix, camera_tf)
         return base_tf[0:3].reshape(-1)
 
-    def baxter_ik_move(self, limb, position, rpy=np.array([-3.14, 0, -3.14]),
-                       offset=np.array([0, 0, 0]), head_camera='no', tag='free', timeout=15.0):
+    def baxter_ik_move(self, limb, position, orientation=np.array([-3.14, 0, -3.14]),
+                       offset=np.array([0, 0, 0]), head_camera='no', tag='free', timeout=15.0, mode='detect'):
         node = "ExternalTools/" + limb + "/PositionKinematicsNode/IKService"
         ik_service = rospy.ServiceProxy(node, SolvePositionIK)
         ik_request = SolvePositionIKRequest()
         if head_camera == 'yes':
             position = self.camera_to_base_tf(position)
         position += offset
-        if tag == 'solid':
-            position[2] = -0.037
-        rpy_pose = np.append(position, rpy)
+        # print(position)
+        if tag == 'taskA' or tag == 'taskB':
+            position[2] = -0.038    #  long: -0.037
+        elif tag == 'taskC':
+            position[2] = 0.040
 
-        hdr = Header(stamp=rospy.Time.now(), frame_id="base")
-        quaternion_pose = conversions.list_to_pose_stamped(rpy_pose, "base")
+        pose_orientation = np.append(position, orientation)
+        quaternion_pose = conversions.list_to_pose_stamped(pose_orientation, "base")
+
+        # print(quaternion_pose)
+        # hdr = Header(stamp=rospy.Time.now(), frame_id="base")
         ik_request.pose_stamp.append(quaternion_pose)
         try:
             rospy.wait_for_service(node, 5.0)
@@ -112,19 +118,25 @@ class RobotInit:
             rospy.logerr("Service request failed: %r" % (error_message,))
             sys.exit("ERROR - baxter_ik_move - Failed to append pose")
         if ik_response.isValid[0]:
-            print("PASS: Valid joint configuration found", position)
+            # print("PASS: Valid joint configuration found", position)
             # convert response to joint position control dictionary
+            if limb == limb:  # if working arm
+                quaternion_pose = baxter_interface.Limb(limb).endpoint_pose()
+                position = quaternion_pose['position']
+
             limb_joints = dict(zip(ik_response.joints[0].name, ik_response.joints[0].position))
             # print(limb_joints)
             # move limb
             baxter_interface.Limb(limb).move_to_joint_positions(limb_joints, timeout=timeout)
+            if(mode == "detect"):
+                return True
         else:
-            print "requested move =", rpy_pose
+            print "requested move =", position, orientation
+            if(mode == "detect"):
+                return False
             sys.exit("ERROR - baxter_ik_move - No valid joint configuration found")
 
-        if limb == limb:  # if working arm
-            quaternion_pose = baxter_interface.Limb(limb).endpoint_pose()
-            position = quaternion_pose['position']
+
 
     def go_to_initial_pose(self):
         # initial_pose_left = np.array([0.525, 0.568, 0.171])
@@ -204,10 +216,13 @@ class RobotInit:
         #     current_position = limb.joint_angle(joint_name)
         limb.move_to_joint_positions(joint_command)
 
-    def cal_gripper_theta(self, theta):
-        #print 0.22-((theta/180)*3.1415926-3.1415926/2)
-        return 0.225-((theta/180)*3.1415926-3.1415926/2)
+    def cal_gripper_theta(self, theta, gripper):
+        judge = 0
+        if gripper=='right':
+            judge = 1
+        return self.get_joint()[judge][gripper+"_w2"] - ((theta/180)*3.1415926-3.1415926/2)
         # return 1.8642-0.017*theta
+
 
 
 if __name__ == "__main__":
