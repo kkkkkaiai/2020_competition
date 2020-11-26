@@ -127,7 +127,7 @@ class RobotInit:
             limb_joints = dict(zip(ik_response.joints[0].name, ik_response.joints[0].position))
             # print(limb_joints)
             # move limb
-            baxter_interface.Limb(limb).move_to_joint_positions(limb_joints, timeout=timeout)
+            baxter_interface.Limb(limb).move_to_joint_positions(limb_joints)
             if(mode == "detect"):
                 return True
         else:

@@ -44,15 +44,33 @@ float camera_cy_wrist;
 float camera_fx_wrist;
 float camera_fy_wrist;
 
+
 const int MinArea = 150;
 const int MaxArea = 600;
 
 int suppres_min = 955, suppres_max = 1180;
-int spprs_xmin = 500, spprs_xmax = 1570, spprs_ymin = 500, spprs_ymax = 880;
+int spprs_xmin = 500, spprs_xmax = 1570, spprs_ymin = 450, spprs_ymax = 880;
 int MinArea_vtc = 40, MaxArea_vtc = 180;
-int MinArea_clr = 90, MaxArea_clr = 500;
+int MinArea_clr = 50, MaxArea_clr = 200;
 int MinArea_clr_hori = 100, MaxArea_clr_hori = 350;
 int gray_supp = 120;
+vector<int>edge{500,820,100,450};
+
+int iLowH = 0, iHighH = 255, iLowS = 0, iHighS = 255, iLowV = 100, iHighV = 255;
+int iLowH_cup = 0, iHighH_cup = 180, iLowS_cup = 0, iHighS_cup = 30, iLowV_cup = 200, iHighV_cup = 250;
+int iLowH_hand_cup = 0, iHighH_hand_cup = 255, iLowS_hand_cup = 90, iHighS_hand_cup = 255, iLowV_hand_cup = 93, iHighV_hand_cup = 250;
+int iLowH_hand_bottle = 0, iHighH_hand_bottle = 255, iLowS_hand_bottle = 0, iHighS_hand_bottle = 45, iLowV_hand_bottle = 88, iHighV_hand_bottle = 255;
+float avgX, avgY;
+float avgX_res, avgY_res;
+
+float avgX_cup, avgY_cup;
+float avgX_hand_cup, avgY_hand_cup;
+
+float avgX_cir, avgY_cir, settled_z;
+float avgX_cir_cup, avgY_cir_cup;
+float avgX_cir_hand_cup, avgY_cir_hand_cup;
+
+float g_dConArea, g_dConArea_cup;
 
 #define ver_dep_min 40
 #define ver_dep_max 85
@@ -87,20 +105,33 @@ class ImgProc
 	ros::ServiceServer server_;
 	image_transport::Subscriber sub_left_cam;
 	image_transport::Subscriber sub_right_cam;
+	image_transport::Subscriber image_color_sub_;
+	image_transport::Subscriber image_depth_sub_;
 
 	cv_bridge::CvImagePtr left_cv_Img_ptr;
 	cv_bridge::CvImagePtr right_cv_Img_ptr;
+	cv_bridge::CvImagePtr realsense_color_ptr;
+	cv_bridge::CvImagePtr realsense_depth_ptr;
 
 	Mat left_color_image;
 	Mat right_color_image;
+
+	Mat	realsense_colorImage;
+	Mat	realsense_depthImage;
+
 
 public:
 	ImgProc(ros::NodeHandle &nh)
 		: nh_(nh), it_(nh)
 	{
 		server_ = nh_.advertiseService("Image_Process_A", &ImgProc::imageProcessCallback, this);
-		sub_left_cam = it_.subscribe("/cameras/left_hand_camera/image", 1, &ImgProc::lWristImgProcessCallbk, this);
-		sub_right_cam = it_.subscribe("/cameras/right_hand_camera/image", 1, &ImgProc::rWristImgProcessCallbk, this);
+		sub_left_cam = it_.subscribe("/cameras/left_hand_camera/image", 4, &ImgProc::lWristImgProcessCallbk, this);
+		sub_right_cam = it_.subscribe("/cameras/right_hand_camera/image", 4, &ImgProc::rWristImgProcessCallbk, this);
+		image_color_sub_ = it_.subscribe("/camera/color/image_raw", 4, &ImgProc::imageRealsenseColorCb, this);
+		image_depth_sub_ = it_.subscribe("/camera/aligned_depth_to_color/image_raw", 4, &ImgProc::imageRealsenseDepthCb, this);
+
+		realsense_colorImage  = Mat::zeros( 1280, 720, CV_8UC3 );
+		realsense_depthImage = Mat::zeros( 1280, 720, CV_16UC1 );
 
 		if (freenect2.enumerateDevices() == 0)
 		{
@@ -177,6 +208,30 @@ public:
 		delete registration;
 	}
 
+	void imageRealsenseColorCb( const sensor_msgs::ImageConstPtr &msg )
+  	{
+		try {
+			realsense_color_ptr	= cv_bridge::toCvCopy( msg, sensor_msgs::image_encodings::BGR8 );
+			realsense_colorImage	= realsense_color_ptr->image;
+			// ROS_INFO("RGB.CHANNLES=%d", realsense_colorImage.channels());
+		} catch ( cv_bridge::Exception &e ) {
+			ROS_ERROR( "Realsense color exception: %s", e.what() );
+			return;
+		}
+	}
+
+	void imageRealsenseDepthCb( const sensor_msgs::ImageConstPtr &msg )
+  	{
+		try {
+			realsense_depth_ptr	= cv_bridge::toCvCopy( msg, sensor_msgs::image_encodings::TYPE_16UC1 );
+			realsense_depthImage	= realsense_depth_ptr->image;
+			// ROS_INFO("RGB.CHANNLES=%d", realsense_depthImage.channels());
+		} catch ( cv_bridge::Exception &e ) {
+			ROS_ERROR( "Realsense color exception: %s", e.what() );
+			return;
+		}
+	}
+
 	void lWristImgProcessCallbk(const sensor_msgs::ImageConstPtr &msg)
 	{
 		try
@@ -226,15 +281,15 @@ public:
 		// cv::imshow("img", depthmat);
 		// cv::waitKey(1000);
 		ROS_INFO("ImgProc service call success");
-
+		ROS_INFO("Request method is: %d", req.method);
 		
 
 		vector<float> result;
 		bool vision_set_judge = false;
 		bool taskA_fun1_judge = false;
 
-		try
-		{   
+		// try
+		// {   
 			if (req.method == -1){
 				depthimg_save(rgbd2, rgbmat);
 				return true;
@@ -242,16 +297,25 @@ public:
 				switch (req.method)
 				{
 					case 0 : result = single(rgbd2, rgbmat);break;
-					case 1 : result = wristRecog(left_color_image, 1, 215);break;
-					case 2 : result = wristRecog(right_color_image, 0, 215);break;
-					case 4 : result = wristRecog(left_color_image, 1, 185);break;
-					case 5 : result = wristRecog(right_color_image, 0, 185);break; // task B
+					case 1 : result = wristRecog(left_color_image, 1, 210);break;
+					case 2 : result = wristRecog(right_color_image, 0, 210);break;
+					case 4 : result = wristRecog(left_color_image, 1, 240);break; // task B
+					case 5 : result = wristRecog(right_color_image, 0, 240);break;
+					case 6 : result = bottle_detect(rgbmat,rgbd2,1);break; // task C // detect cup
+					case 7 : result = bottle_detect(rgbmat,rgbd2,0);break; // detect bottle
+					case 8 : result = recog_on_hand(realsense_colorImage,edge,realsense_depthImage);break;
+					case 9 : result = hand_cup_detect(left_color_image, 1);break;
+					case 10 : result = hand_cup_detect(right_color_image, 0);break;
+					case 11 : result = hand_bottle_detect(left_color_image, 1);break;
+					case 12 : result = hand_bottle_detect(right_color_image, 0);break;
+
 					default: vision_set_judge = true;
 				}
 				if(vision_set_judge){
 					switch (req.method)
 					{
 						case 3 : taskA_fun1(rgbmat, rgbd2);ROS_INFO("3");break;
+						case 13 : taskB(rgbmat, rgbd2);ROS_INFO("13");break;
 						default: taskA_fun1_judge = true;
 					}
 					if(taskA_fun1_judge){
@@ -284,12 +348,12 @@ public:
 				}
 				
 			}
-		}
-		catch (ros::Exception e)
-		{
-			ROS_ERROR("Image process fail");
-			return false;
-		}
+		// }
+		// catch (ros::Exception e)
+		// {
+		// 	ROS_ERROR("Image process fail");
+		// 	return false;
+		// }
 
 		return true;
 	}
@@ -585,8 +649,8 @@ public:
 				}
 			}
 
-		cv::imshow("binary", binary);
-		cv::waitKey(1000);
+		//cv::imshow("binary", binary);
+		//cv::waitKey(0);
 		vector<vector<Point>> contours;
 		findContours(binary, contours, CV_RETR_LIST, CV_CHAIN_APPROX_NONE);
 		if (!contours.size())
@@ -606,11 +670,6 @@ public:
 				center.y = M.m01 / M.m00;
 
 				crosspcnt.push_back(center);
-
-				//circle(binary, center, 3, Scalar(180), -1);
-				//cout << "(" << center.x << "," << center.y << ")"
-				//	<< "     ";
-				//cout << contours[i].size() << endl;
 			}
 		}
 		// cv::imshow("result", binary);
@@ -634,9 +693,9 @@ public:
 			}
 	}
 
-	int predict(string path)
+	int predict(string path,string savepath)
 	{
-		Ptr<ml::SVM> svm = ml::SVM::load("/home/ljq/ros_ws/src/image_proc/param/svm.xml");
+		Ptr<ml::SVM> svm = ml::SVM::load(savepath);
 		Mat image = imread(path);
 		Mat img = image.reshape(1, 1);
 		img.convertTo(img, CV_32FC1);
@@ -644,15 +703,15 @@ public:
 		return int(svm->predict(img));
 	}
 
-	void datapadding(Mat &roi)
+	void datapadding(Mat& roi, int pixmin, int n)
 	{
 		if (roi.type() != CV_8UC1)
 		{
 			cout << "input error!" << endl;
 			return;
 		}
-		int n = 70;
-		int pixmin = 50;
+		//int n = 70; //the size of the output image is n * n
+		//int pixmin = 50;//if the pixel's value > pixmin, pixel's value = 0;
 		Mat padding_roi = Mat::zeros(n, n, CV_8UC1);
 		int padd_col = 0, padd_row = 0;
 		if (roi.cols < n)
@@ -682,9 +741,9 @@ public:
 		roi = padding_roi.clone();
 	}
 
-	void rotate_gjx(Mat image, float angle, Point2f center, Point2f vertex[], std::string filename)
+	void rotate_gjx(Mat image, float angle, Point2f center, Point2f vertex[], std::string filename,int pixmin,int n)
 	{
-
+		
 		Mat mask = Mat::zeros(image.rows, image.cols, CV_8UC1);
 		for (int j = 0; j < 4; j++)
 		{
@@ -708,26 +767,23 @@ public:
 		for (int i = 0; i < contours.size(); i++)
 		{
 			boundRect[i] = boundingRect(Mat(contours[i]));
-			if (contours[i].size() > MinArea_clr && contours[i].size() < MaxArea_clr)
+			//if (contours[i].size() > MinArea_clr && contours[i].size() < MaxArea_clr)
 			{
 
 				Moments M = moments(contours[i]);
 				Point2f cenMsk;
 				cenMsk.x = M.m10 / M.m00;
 				cenMsk.y = M.m01 / M.m00;
-				//œØÈ¡
 				Mat roi = Mat(img_rot, boundRect[i]);
 				Mat temp;
 				cvtColor(roi, temp, COLOR_BGR2GRAY);
-				datapadding(temp);
-				/*imshow("roi", roi);
-		waitKey(1000);*/
+				datapadding(temp,pixmin,n);
 				imwrite(filename, temp);
 			}
 		}
 	}
 
-	void findver_color(Mat &colorImg, vector<Point2f> crosspcnt, Mat depImg)
+	void findver_color(Mat& colorImg, vector<Point2f> crosspcnt, Mat depImg)
 	{
 		Mat copyimg = colorImg.clone();
 		Mat binaryimg = Mat::zeros(colorImg.rows, colorImg.cols, CV_8UC1);
@@ -745,8 +801,8 @@ public:
 					binaryimg.at<uchar>(j, i) = 255;
 			}
 
-		cv::imshow("binary", binaryimg);
-		cv::waitKey(1000);
+		//cv::imshow("binary", binaryimg);
+		//cv::waitKey(1000);
 
 		vector<vector<Point>> contours;
 		findContours(binaryimg, contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_NONE);
@@ -767,7 +823,7 @@ public:
 					Point2f center;
 					center.x = M.m10 / M.m00;
 					center.y = M.m01 / M.m00;
-
+					
 					for (int k = 0; k < crosspcnt.size(); k++)
 					{
 						if (abs(crosspcnt[k].x - center.x) < 30 && abs(crosspcnt[k].y - center.y) < 30 && cv::pointPolygonTest(contours[i], crosspcnt[k], false) == 1)
@@ -775,17 +831,17 @@ public:
 							vision_set.issuccess = 1;
 							vision_set.grip_method.push_back(1);
 
-							vector<float> temp;
+							vector<float>temp;
 							temp.push_back(center.x);
 							temp.push_back(center.y);
-							temp.push_back(1000); //z will be changed in main fun
+							temp.push_back(1000);//z will be changed in main fun 
 
 							float angle;
 							if (boundRect[i].size.height > boundRect[i].size.width)
 								angle = 90.0 + abs(boundRect[i].angle);
 							else
 								angle = abs(boundRect[i].angle);
-							cout << "angle:" << angle << endl;
+							//cout << "angle:" << angle << endl;
 							temp.push_back(angle);
 
 							vision_set.cntrpoint.push_back(temp);
@@ -794,11 +850,12 @@ public:
 							boundRect[i].points(vertex);
 							std::string filename;
 							filename = "./o.jpg";
-							rotate_gjx(colorImg, -angle, center, vertex, filename);
+							rotate_gjx(colorImg, -angle, center, vertex, filename,50,70);
 
-							cout << "class:" << predict(filename) << endl;
+							int pre_class = predict(filename, "/home/ljq/ros_ws/src/image_proc/param/svm.xml");
+							//cout << "class:" << pre_class << endl;
 
-							vision_set.classify.push_back(predict(filename));
+							vision_set.classify.push_back(pre_class);
 
 							//visualization
 							for (int j = 0; j < 4; j++)
@@ -807,9 +864,8 @@ public:
 							}
 							drawContours(copyimg, contours, i, Scalar(0, 0, 255), 1);
 							circle(copyimg, center, 3, Scalar(0, 0, 255), -1);
-							cout << "(" << center.x << "," << center.y << ")"
-								 << "     ";
-							cout << contours[i].size() << endl;
+							//cout << "(" << center.x << "," << center.y << ")"<< "     ";
+							//cout << contours[i].size() << endl;
 
 							/***fill contours with black***/
 							Point root_points[1][4];
@@ -817,18 +873,20 @@ public:
 							root_points[0][1] = vertex[1];
 							root_points[0][2] = vertex[2];
 							root_points[0][3] = vertex[3];
+							
 
-							const Point *ppt[1] = {root_points[0]};
-							int npt[] = {4};
+							const Point* ppt[1] = { root_points[0] };
+							int npt[] = { 4 };
 
 							polylines(colorImg, ppt, npt, 1, 1, Scalar(0, 0, 0), 1, 8, 0);
 							fillPoly(colorImg, ppt, npt, 1, Scalar(0, 0, 0));
+
 						}
 					}
 				}
 			}
-			cv::imshow("result", copyimg);
-			cv::imshow("colorImg", colorImg);
+			cv::imshow("result", copyimg); 
+			//cv::imshow("colorImg", colorImg);
 			cv::waitKey(1000);
 		}
 	}
@@ -851,7 +909,7 @@ public:
 				if (grayImg.at<uchar>(j, i) < gray_supp)
 				{
 				}
-				else if (true /*depImg.at<unsigned short int>(j, i) > hor_dep_min && depImg.at<unsigned short int>(j, i) < hor_dep_max*/)
+				else if (true/*depImg.at<unsigned short int>(j, i) > hor_dep_min && depImg.at<unsigned short int>(j, i) < hor_dep_max*/)
 					binaryimg.at<uchar>(j, i) = 255;
 			}
 
@@ -889,27 +947,36 @@ public:
 					center.x = M.m10 / M.m00;
 					center.y = M.m01 / M.m00;
 					circle(copyimg, center, 3, Scalar(0, 0, 255), -1);
-					cout << "(" << center.x << "," << center.y << ")"
-						 << "     ";
-					cout << "contours size:" << contours[i].size() << endl;
+					//cout << "(" << center.x << "," << center.y << ")" << "     ";
+					//cout << "height of the object:" << depImg.at<unsigned short int>(int(center.y), int(center.x)) << endl;
+					//cout << "contours size:" << contours[i].size() << endl;
 
-					double angle;
+					float angle;
 					if (boundRect[i].size.height > boundRect[i].size.width)
 						angle = 90.0 + abs(boundRect[i].angle);
 					else
 						angle = abs(boundRect[i].angle);
 
-					cout << "angle:" << angle << endl;
-					cout << endl;
-
-					vector<float> temp;
+					//cout << "angle:" << angle << endl;
+					//cout << endl;
+					
+					vector<float>temp;
 					temp.push_back(center.x);
 					temp.push_back(center.y);
 					temp.push_back(1000);
 					temp.push_back(angle);
 					vision_set.cntrpoint.push_back(temp);
+					int objheight = depImg.at<unsigned short int>(int(center.y), int(center.x));
+					if (objheight < 15)
+					{
+						vision_set.classify.push_back(2);
+					}
+					else
+					{
+						vision_set.classify.push_back(-1);
+					}
 
-					vision_set.classify.push_back(-1);
+					
 				}
 			}
 			cv::imshow("result", copyimg);
@@ -978,6 +1045,513 @@ public:
 					vision_set.classify[i], vision_set.grip_method[i]);
 		}
 	}
+	
+	
+	/*recognition  by operating hands*/
+vector<float>  hand_process(Mat colorImg/*,vector<int>area*/)
+{
+	vector<float> result;
+	result.resize(4);
+	Mat copyimg = colorImg.clone();
+	Mat binaryimg = Mat::zeros(colorImg.rows, colorImg.cols, CV_8UC1);
+
+	Mat grayImg;
+	cvtColor(colorImg, grayImg, COLOR_BGR2GRAY);
+	GaussianBlur(grayImg, grayImg, Size(5, 5), 0);
+	for (int i = 0; i < colorImg.cols; i = i + 1)
+		for (int j = 0; j < colorImg.rows; j = j + 1)
+		{
+			if (grayImg.at<uchar>(j, i) > 200)
+			{
+				binaryimg.at<uchar>(j, i) = 255;
+			}
+		}
+
+	cv::imshow("binary", binaryimg);
+	cv::waitKey(1000);
+
+	vector<vector<Point>> contours;
+	findContours(binaryimg, contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_NONE);
+	if (!contours.size())
+	{
+		cout << "contours not exits" << endl;
+		return result;
+	}
+	else
+	{
+		vector<RotatedRect> boundRect(contours.size());
+		for (int i = 0; i < contours.size(); i++)
+		{
+			boundRect[i] = minAreaRect(Mat(contours[i]));
+			if (contours[i].size() > 120 && contours[i].size() < 500 && 
+				float(boundRect[i].size.height) / float(boundRect[i].size.width) > 1 / 3 &&
+				float(boundRect[i].size.height) / float(boundRect[i].size.width) < 3)
+			{
+				Point2f vertex[4];
+				boundRect[i].points(vertex);
+
+				for (int j = 0; j < 4; j++)
+				{
+					line(copyimg, vertex[j], vertex[(j + 1) % 4], Scalar(0, 0, 255));
+				}
+				drawContours(copyimg, contours, i, Scalar(0, 0, 255), 1);
+				Moments M = moments(contours[i]);
+				Point2f center;
+				center.x = M.m10 / M.m00;
+				center.y = M.m01 / M.m00;
+				circle(copyimg, center, 3, Scalar(0, 0, 255), -1);
+				cout << "(" << center.x << "," << center.y << ")" << "     ";
+				cout << "contours size:" << contours[i].size() << endl;
+
+				double angle;
+				if (boundRect[i].size.height > boundRect[i].size.width)
+					angle = 90.0 + abs(boundRect[i].angle);
+				else
+					angle = abs(boundRect[i].angle);
+
+				cout << "angle:" << angle << endl;
+				cout << endl;
+
+				//string filename;
+				//filename = "./GR/secondlook2/" + to_string(cnt) + ".jpg";
+				//cnt++;
+				//rotate_gjx(colorImg, -angle, center, vertex, filename,120,120);
+				std::string filename;
+				filename = "./o.jpg";
+				rotate_gjx(colorImg, -angle, center, vertex, filename, 120, 120);
+				int pre_class = predict(filename, "/home/ljq/ros_ws/src/image_proc/param/svm_hand.xml");
+				cout<<"class="<<pre_class<<endl;
+				if(pre_class!=4)
+				{
+					result[0]=pre_class;
+				}
+				//cout<<"class="<<pre_class<<endl;
+				//ROS_INFO("class= %d", pre_class);
+
+			}
+		}
+		//cv::imshow("result", copyimg);
+		//cv::waitKey(0);
+	}
+	return result;
+}
+
+vector<float> recog_on_hand(Mat colorImg, vector<int>edge,Mat depImg)
+{
+
+	vector<float> result;
+	result.resize(4);
+	Mat copyimg = colorImg.clone();
+	Mat binaryimg = Mat::zeros(colorImg.rows, colorImg.cols, CV_8UC1);
+
+	Mat grayImg;
+	cvtColor(colorImg, grayImg, COLOR_BGR2GRAY);
+	int x_min = edge[0], x_max = edge[1], y_min = edge[2], y_max = edge[3];
+	for (int i = x_min; i < x_max; i = i + 1)
+		for (int j = y_min; j < y_max; j = j + 1)
+		{
+			if (depImg.at<unsigned short int>(j,i) > 400 && depImg.at<unsigned short int>(j, i) < 660)
+			{
+				binaryimg.at<uchar>(j, i) = 255;
+			}
+		}
+
+	//imshow("binary", binaryimg);
+	//waitKey(0);
+	vector<vector<Point>> contours;
+	findContours(binaryimg, contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_NONE);
+	if (!contours.size())
+	{
+	
+		cout << "contours not exits" << endl;
+		return result;
+	}
+	else
+	{
+		vector<Rect> boundRect(contours.size());
+		for (int i = 0; i < contours.size(); i++)
+		{
+			if (contours[i].size() > 1000)
+			{
+				cout << contours[i].size() << endl;
+				boundRect[i] = boundingRect(Mat(contours[i]));
+				Mat dst;
+				dst = colorImg(boundRect[i]);
+				result= hand_process(dst);
+			}				
+		}
+
+		//cv::imshow("result", copyimg); 
+		//cv::waitKey(1000);
+	}
+	return result;
+}
+	
+void taskB(Mat colorImg, Mat depImg)
+{
+	Mat depobj, depImgBG;
+	depthimg_save2(depImg, "guojiaxin.bmp");
+	imwrite("guojiaxin.jpg", colorImg);
+
+	depthimg_read2("guojiaxin.bmp", depImg);
+
+	depthimg_read2("/home/ljq/ros_ws/src/image_proc/param/0_align.bmp", depImgBG);
+	caldiff(depImg, depImgBG, depobj);
+	find_stand_obj(colorImg, depobj);
+	Mat copyimg = colorImg.clone();
+	Mat binaryimg = Mat::zeros(colorImg.rows, colorImg.cols, CV_8UC1);
+
+	Mat grayImg;
+	cvtColor(colorImg, grayImg, COLOR_BGR2GRAY);
+	GaussianBlur(grayImg, grayImg, Size(5, 5), 0);
+	for (int i = spprs_xmin; i < spprs_xmax; i = i + 1)
+		for (int j = spprs_ymin; j < spprs_ymax; j = j + 1)
+		{
+			if (grayImg.at<uchar>(j, i) < gray_supp)
+			{
+			}
+			else if (true/*depImg.at<unsigned short int>(j, i) > hor_dep_min && depImg.at<unsigned short int>(j, i) < hor_dep_max*/)
+				binaryimg.at<uchar>(j, i) = 255;
+		}
+
+	vector<vector<Point>> contours;
+	findContours(binaryimg, contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_NONE);
+	if (!contours.size())
+	{
+
+		cout << "contours not exits" << endl;
+		return;
+	}
+	else
+	{
+		vector<RotatedRect> boundRect(contours.size());
+		for (int i = 0; i < contours.size(); i++)
+		{
+			boundRect[i] = minAreaRect(Mat(contours[i]));
+			if (contours[i].size() > 90 && contours[i].size() < 500 &&
+				boundRect[i].size.height / boundRect[i].size.width > 1 / 3 && boundRect[i].size.height / boundRect[i].size.width < 3)
+			{
+				Moments M = moments(contours[i]);
+				Point2f center;
+				center.x = M.m10 / M.m00;
+				center.y = M.m01 / M.m00;
+				cout << "contour.size=" << contours[i].size() << endl;
+
+				float angle;
+				if (boundRect[i].size.height > boundRect[i].size.width)
+					angle = 90.0 + abs(boundRect[i].angle);
+				else
+					angle = abs(boundRect[i].angle);
+				cout << "angle:" << angle << endl;
+
+
+				Point2f vertex[4];
+				boundRect[i].points(vertex);
+				if (contours[i].size() > 175)
+				{
+					std::string filename;
+					filename = "./o.jpg";
+					rotate_gjx(colorImg, -angle, center, vertex, filename, 80, 100); 
+					
+					int pre_class = predict(filename, "/home/ljq/ros_ws/src/image_proc/param/svm_bttm.xml");
+					cout << "class:" << pre_class << endl;
+
+					if (pre_class != 9)
+					{
+						vector<float>temp;
+						temp.push_back(center.x);
+						temp.push_back(center.y);
+						temp.push_back(1000);
+						temp.push_back(angle);
+						vision_set.cntrpoint.push_back(temp);
+						vision_set.classify.push_back(pre_class);
+						vision_set.grip_method.push_back(2);
+						vision_set.issuccess = 1;
+
+						/***fill contours with black***/
+						Point root_points[1][4];
+						root_points[0][0] = vertex[0];
+						root_points[0][1] = vertex[1];
+						root_points[0][2] = vertex[2];
+						root_points[0][3] = vertex[3];
+
+
+						const Point* ppt[1] = { root_points[0] };
+						int npt[] = { 4 };
+
+						polylines(colorImg, ppt, npt, 1, 1, Scalar(0, 0, 0), 1, 8, 0);
+						fillPoly(colorImg, ppt, npt, 1, Scalar(0, 0, 0));
+					}
+
+				}
+				//visualization
+				for (int j = 0; j < 4; j++)
+				{
+					line(copyimg, vertex[j], vertex[(j + 1) % 4], Scalar(0, 0, 255));
+				}
+				drawContours(copyimg, contours, i, Scalar(0, 0, 255), 1);
+				circle(copyimg, center, 3, Scalar(0, 0, 255), -1);
+				cout << "(" << center.x << "," << center.y << ")"
+					<< "     ";
+				//cout << contours[i].size() << endl;
+				
+			}
+		}
+		cv::imshow("result", copyimg);
+		cv::waitKey(1000);
+	}
+	findhorizontal(colorImg, depobj);
+}
+
+
+/************************************/
+  
+	const int caijian_x = 500, caijian_y = 500, caijian_w = 1100, caijian_h = 450;
+
+	vector<float> bottle_detect(Mat &colorImg, Mat &depthImg, int flag){		
+		vector<Point> approx;
+        vector<vector<Point>> contours;
+        vector<Vec4i> hierarchy;	
+        vector<Rect> boundRect(contours.size());
+        Mat imgThresholded,imgThresholded_cup;
+        Mat imgHSV,imgHSV_bottle;
+        Point2f center;
+        float radius;
+		vector<float> results;
+		results.resize(4);
+
+        vector<float> results1;
+        results1.resize(4);
+		int caijian_x = 500, caijian_y = 500, caijian_w = 1000, caijian_h = 400;
+
+		Rect rect1(caijian_x, caijian_y, caijian_w, caijian_h); 
+		colorImg = colorImg(rect1);
+		imshow("colorImg",colorImg);
+
+		cvtColor(colorImg, imgHSV, COLOR_BGR2HSV);
+		Mat element = getStructuringElement(MORPH_RECT, Size(1, 1));
+		Mat element1 = getStructuringElement(MORPH_RECT, Size(4, 4));
+		inRange(imgHSV, Scalar(iLowH, iLowS, iLowV), Scalar(iHighH, iHighS, iHighV), imgThresholded); //Threshold the image
+		dilate(imgThresholded, imgThresholded, element);
+		erode(imgThresholded, imgThresholded, element1);
+		imshow("imgThresholded",imgThresholded);
+		results = counter_detect(imgThresholded,colorImg,depthImg);
+
+		if(flag == 1){
+			return results;
+		}
+		//cout<<"res"<<results<<endl;
+		cvtColor(colorImg, imgHSV_bottle, COLOR_BGR2HSV);
+		imshow("colorImg1",colorImg);
+
+		inRange(imgHSV_bottle, Scalar(iLowH_cup, iLowS_cup, iLowV_cup), Scalar(iHighH_cup, iHighS_cup, iHighV_cup), imgThresholded_cup); //Threshold the image
+		imshow("imgThresholded1",imgThresholded_cup);
+
+		dilate(imgThresholded_cup, imgThresholded_cup, element);
+		erode(imgThresholded_cup, imgThresholded_cup, element1);
+		waitKey(1000);	
+		results = counter_detect(imgThresholded_cup,colorImg,depthImg);
+		// cout << "res0: " << results[0] <<"res1: " << results[1] << "res2: " << results[2] << "res3: " << results[3] << endl;
+
+		return results;
+	}
+
+	vector<float> cup_detect(Mat &colorImg, Mat &depthImg){
+		vector<float> results;
+		Mat imgThresholded_cup;
+        Point2f center;
+        float radius;
+		results.resize(4);
+		vector<Mat> hsvSplit_cup;
+		vector<vector<Point>> contours;
+		vector<Vec4i> hierarchy;
+
+		cvtColor(colorImg, colorImg, COLOR_BGR2HSV);
+		
+		inRange(colorImg, Scalar(iLowH_cup, iLowS_cup, iLowV_cup), Scalar(iHighH_cup, iHighS_cup, iHighV_cup), imgThresholded_cup); //Threshold the image
+		Mat element_cup = getStructuringElement(MORPH_RECT, Size(3, 3));
+		Mat element1_cup = getStructuringElement(MORPH_RECT, Size(6, 6));
+		erode(imgThresholded_cup, imgThresholded_cup, element_cup);
+		dilate(imgThresholded_cup, imgThresholded_cup, element1_cup);
+
+		results = counter_detect(imgThresholded_cup, colorImg, depthImg);
+		return results;
+	}
+
+	vector<float> counter_detect(Mat &imgThresholded, Mat &colorImg, Mat &depthImg){
+		// ROS_INFO("COUNTER DETECT START");
+		vector<vector<Point>> contours;
+		vector<Vec4i> hierarchy;
+		vector<Rect> boundRect(contours.size());
+		vector<float> results;
+		settled_z = 10;
+		results.resize(4);
+        Point2f center;
+		float radius;
+		findContours(imgThresholded, contours, hierarchy, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+		for (int i = 0; i < contours.size(); i++)
+		{
+			// ROS_INFO("area: %f", g_dConArea);
+			g_dConArea = fabs(contourArea(contours[i], true));
+
+			if (g_dConArea > 600.0 && g_dConArea < 15000.0)
+			{	
+				// ROS_INFO("i: %d", i);
+				Rect boundRect;
+				boundRect = boundingRect(Mat(contours[i]));
+
+					rectangle(imgThresholded, boundRect, Scalar(255, 255, 255));
+					for (int i = boundRect.x; i < boundRect.x+boundRect.width; i++){
+						for (int j = boundRect.y; j <boundRect.y+boundRect.height; j++){
+							if (settled_z > depthImg.at<float>(int(avgY), int(avgX))*0.001){
+								settled_z = depthImg.at<float>(int(avgY), int(avgX))*0.001;
+							}
+						}
+					}
+					avgX = (boundRect.x+boundRect.x+boundRect.width)/2;
+					avgY = (boundRect.y+boundRect.y+boundRect.height)/2;
+					avgX = avgX + caijian_x;
+					avgY = avgY + caijian_y;
+					// ROS_INFO("detected_avg: %f, %f,%f", avgX, avgY, settled_z);
+
+					minEnclosingCircle(Mat(contours[i]), center, radius);
+					avgX_cir = center.x;
+					avgY_cir = center.y;
+
+					settled_z = depthImg.at<float>(int(avgY), int(avgX))*0.001;
+					avgX_cir = avgX_cir + caijian_x;
+					avgY_cir = avgY_cir + caijian_y;
+
+					avgX_res = -(avgX - camera_cx) * settled_z / camera_fx;
+					avgY_res = (avgY - camera_cy) * settled_z / camera_fy;
+
+					results[0] = avgX_res;
+					results[1] = avgY_res;
+					results[2] = settled_z;
+
+					// ROS_INFO("detected: %f, %f, %f", avgX_res, avgY_res, settled_z);
+					
+					Point root_points[1][4];
+					root_points[0][0] = Point2i(boundRect.x, boundRect.y);
+					root_points[0][1] = Point2i(boundRect.x+boundRect.width,boundRect.y);
+					root_points[0][2] = Point2i(boundRect.x+boundRect.width, boundRect.y+boundRect.height);
+					root_points[0][3] = Point2i(boundRect.x,boundRect.y+boundRect.height);
+					const Point* ppt[1] = { root_points[0] };
+					int npt[] = { 4 };
+					polylines(colorImg, ppt, npt, 1, 1, Scalar(0, 0, 0), 1, 8, 0);
+					fillPoly(colorImg, ppt, npt, 1, Scalar(0, 0, 0));
+					// imshow("rect",colorImg);
+					// waitKey(1000);
+
+			}
+		}
+		ROS_INFO("results: %f, %f, %f", results[0], results[1], results[2]);
+		// ROS_INFO("COUNTER DETECT END");
+		return results;
+	}
+
+    vector<float> hand_counter_detect(Mat &imgThresholded,int flag){
+        vector<vector<Point>> contours;
+        vector<Vec4i> hierarchy;
+        vector<Rect> boundRect(contours.size());
+		vector<float> results;
+		results.resize(4);
+		settled_z = 10;
+        Point2f center;
+        float radius;
+        if (flag == 0)
+        {
+            camera_cx_wrist = 488.904;
+            camera_cy_wrist = 280.927;
+            camera_fx_wrist = 405.821;
+            camera_fy_wrist = 405.821;
+        }
+        else if (flag == 1)
+        {
+            camera_cx_wrist = 467.294;
+            camera_cy_wrist = 340.350;
+            camera_fx_wrist = 404.940;
+            camera_fy_wrist = 404.940;
+        }
+        findContours(imgThresholded, contours, hierarchy, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+        for (int i = 0; i < contours.size(); i++)
+        {
+            g_dConArea = fabs(contourArea(contours[i], true));
+            if (g_dConArea > 600)
+            {
+                Rect boundRect;
+                boundRect = boundingRect(Mat(contours[i]));
+                rectangle(imgThresholded, boundRect, Scalar(255, 255, 255));
+
+                avgX = (boundRect.x+boundRect.x+boundRect.width)/2;
+                avgY = (boundRect.y+boundRect.y+boundRect.height)/2;
+                if (float(boundRect.width)/float(boundRect.height)>0.8 &&float(boundRect.width)/float(boundRect.height)<1.2){
+                    ROS_INFO("detected_avg: %f, %f", avgX, avgY);
+                    minEnclosingCircle(Mat(contours[i]), center, radius);
+                    avgX_cir = center.x;
+                    avgY_cir = center.y;
+					settled_z = 0.215;
+                    avgX_res = (avgX_cir - camera_cx_wrist) * settled_z / camera_fx_wrist;
+                    avgY_res = (avgY_cir - camera_cy_wrist) * settled_z / camera_fx_wrist;
+
+                    results[0] = avgX_res;
+                    results[1] = avgY_res;
+                    results[2] = settled_z;
+                }
+            }
+        }
+        return results;
+    }
+
+    vector<float> hand_cup_detect(Mat &colorImg,  int flag){
+		ROS_INFO("Hand_cup_detect start");
+        vector<float> results;
+        Mat imgThresholded_cup;
+
+        results.resize(4);
+        vector<Mat> hsvSplit_cup;
+        vector<vector<Point>> contours;
+        vector<Vec4i> hierarchy;
+        cvtColor(colorImg, colorImg, COLOR_BGR2HSV);
+        inRange(colorImg, Scalar(iLowH_hand_cup, iLowS_hand_cup, iLowV_hand_cup), Scalar(iHighH_hand_cup, iHighS_hand_cup, iHighV_hand_cup), imgThresholded_cup); //Threshold the image
+        Mat element_cup = getStructuringElement(MORPH_RECT, Size(3, 3));
+        Mat element1_cup = getStructuringElement(MORPH_RECT, Size(5, 5));
+
+        erode(imgThresholded_cup, imgThresholded_cup, element_cup);
+        dilate(imgThresholded_cup, imgThresholded_cup, element1_cup);
+        Point2f center;
+        float radius;
+        results = hand_counter_detect(imgThresholded_cup,flag);
+		imshow("hand_cup_detect", imgThresholded_cup);
+		waitKey(1000);
+		ROS_INFO("Hand_cup_detect end");
+        return results;
+    }
+	
+    vector<float> hand_bottle_detect(Mat &colorImg, int flag){
+		ROS_INFO("Hand_bottle_detect start");
+        vector<float> results;
+        Mat imgThresholded_bottle;
+        results.resize(4);
+        vector<Mat> hsvSplit_cup;
+        vector<vector<Point>> contours;
+        vector<Vec4i> hierarchy;
+		imshow("hand_bottle_color", colorImg);
+        cvtColor(colorImg, colorImg, COLOR_BGR2HSV);
+
+        inRange(colorImg, Scalar(iLowH_hand_bottle, iLowS_hand_bottle, iLowV_hand_bottle), Scalar(iHighH_hand_bottle, iHighS_hand_bottle, iHighV_hand_bottle), imgThresholded_bottle); //Threshold the image
+        Mat element_cup = getStructuringElement(MORPH_RECT, Size(3,3));
+        Mat element1_cup = getStructuringElement(MORPH_RECT, Size(6, 6));
+		imshow("hand_bottle_detect", imgThresholded_bottle);
+        erode(imgThresholded_bottle, imgThresholded_bottle, element_cup);
+        dilate(imgThresholded_bottle, imgThresholded_bottle, element1_cup);
+        Point2f center;
+        float radius;
+        results = hand_counter_detect(imgThresholded_bottle, flag);
+		
+		ROS_INFO("Hand_bottle_detect end");
+        return results;
+    }
 };
 
 int main(int argc, char **argv)

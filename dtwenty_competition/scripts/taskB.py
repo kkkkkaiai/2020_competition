@@ -29,6 +29,7 @@ client = rospy.ServiceProxy(service_name, ImageProcSrv)
 
 offset = np.array([0.05, 0.07, 0.1])
 
+
 ## just open once
 ########################################################
 # robot.camera_open('left_hand_camera', exposure=10)   #
@@ -49,13 +50,14 @@ def lookupTransform(tf_listener, target, source):
     source_target = tf.transformations.compose_matrix(translate=trans, angles=euler)
     return source_target
 
+
 ########################################################################################################################
 #
 class object:
     def __init__(self, position, grip_method, classify):
         self.position = position
-        self.grip_method = grip_method
         self.classify = classify
+        self.grip_method = grip_method
 
     def print_object(self):
         print(self.position, self.grip_method, self.classify)
@@ -131,7 +133,7 @@ def multi_object_recog_2():
     rospy.loginfo("multi_object_recog_2 start")
     client.wait_for_service()
     request = ImageProcSrvRequest()
-    request.method = 3
+    request.method = 13
     # rospy.loginfo(request)
 
     response = client.call(request)
@@ -148,14 +150,16 @@ def multi_object_recog_2():
         for i in range(right_task_num):
             right_gripper_task[i].print_object()
 
+        rospy.loginfo("multi_object_recog_2 finish")
         return left_task_num, right_task_num, left_gripper_task, right_gripper_task
-    rospy.loginfo("multi_object_recog_2 finish")
+
+
 
 ########################################################################################################################
 
 ########################################################################################################################
-#
-def use_hand_to_grip_3(gripper, pre_position):  # gripper: 'left'/'right'
+# TODO
+def use_hand_to_grip_3(gripper, pre_position, grip_method):  # gripper: 'left'/'right'
     rospy.loginfo("use_hand_to_grip_3 start")
     # robot.baxter_ik_move(gripper, pre_position, offset=offset, tag='taskB')
     robot.baxter_ik_move(gripper, pre_position, tag='taskB')
@@ -213,11 +217,11 @@ def use_hand_to_grip_3(gripper, pre_position):  # gripper: 'left'/'right'
 ########################################################################################################################
 #
 r_left_observation = {'left_w0': -1.4131798008394374, 'left_w1': 0.9986214929134043, 'left_w2': -0.18752915131899184,
-                    'left_e0': -0.5518495884417776, 'left_e1': 1.309636097657172, 'left_s0': -0.8248981686853812,
-                    'left_s1': -0.5330583237901813}
+                      'left_e0': -0.5518495884417776, 'left_e1': 1.309636097657172, 'left_s0': -0.8248981686853812,
+                      'left_s1': -0.5330583237901813}
 r_right_observation = {'right_s0': 0.3834951969713534, 'right_s1': -1.252111818111469,
-                     'right_w0': 1.398606983354526, 'right_w1': 1.8311895655382127, 'right_w2': 0.16528642989465334,
-                     'right_e0': 0.03029612056073692, 'right_e1': 1.975767254796413}
+                       'right_w0': 1.398606983354526, 'right_w1': 1.8311895655382127, 'right_w2': 0.16528642989465334,
+                       'right_e0': 0.03029612056073692, 'right_e1': 1.975767254796413}
 
 l_left_observation = {'left_w0': -0.8149272935641261, 'left_w1': 0.9690923627466101, 'left_w2': -0.44715539966859813,
                       'left_e0': -1.3330293046724246, 'left_e1': 1.8035779113562753, 'left_s0': 0.17065536265225228,
@@ -227,21 +231,32 @@ l_right_observation = {'right_s0': 0.4663301595171658, 'right_s1': -0.4962427848
                        'right_w1': 1.013577805595287, 'right_w2': -0.056373793954788955, 'right_e0': 0.6722670802907825,
                        'right_e1': 1.3909370794150988}
 
-def hand_to_observation(gripper):
-    baxter_interface.Limb('left').move_to_joint_positions(left_observation)
 
-    client.wait_for_service()
-    request = ImageProcSrvRequest()
-    request.method = 2
-    # try:
-    response = client.call(request)
-    if isinstance(response, ImageProcSrvResponse):
-        theta = response.object[0].orientation[0]
-        print(theta)
-        if theta == 0:
-            theta = 180
+def go_to_observe_position(gripper):
+    if gripper == 'left':
+        front = 'left'
+        back = 'right'
+        front_observation = l_left_observation
+        back_observation = l_right_observation
+    else:
+        front = 'right'
+        back = 'left'
+        front_observation = r_right_observation
+        back_observation = r_left_observation
+    try:
+        t1 = threading.Thread(target=baxter_interface.Limb(front).move_to_joint_positions, args=(front_observation,))
+        # baxter_interface.Limb(front).move_to_joint_positions(front_observation)
+        t2 = threading.Thread(target=baxter_interface.Limb(back).move_to_joint_positions, args=(back_observation,))
+        # baxter_interface.Limb(back).move_to_joint_positions(back_observation)
+        t1.start()
+        time.sleep(0.3)
+        t2.start()
+        t1.join()
+        t2.join()
 
-        # print(rotate_theta)
+    except Exception:
+        rospy.loginfo("go_to_observe_position")
+
 
 ########################################################################################################################
 #
@@ -331,11 +346,11 @@ def exchange_gripper_5(direction, method):  # direction: left2right/right2left; 
 # method 1 right2left
 
 r2l_l_method1 = {'left_w0': -0.9491506125040997, 'left_w1': 1.1807817114747972, 'left_w2': -0.43104860139580126,
-                'left_e0': -0.6622962051695274, 'left_e1': 1.9949420146449806, 'left_s0': 0.06442719309118737,
-                'left_s1': -0.44485442848677}
+                 'left_e0': -0.6622962051695274, 'left_e1': 1.9949420146449806, 'left_s0': 0.06442719309118737,
+                 'left_s1': -0.44485442848677}
 r2l_r_method1 = {'right_s0': 0.27228158984966094, 'right_s1': -1.2241166687325602, 'right_w0': -0.3846456825622675,
-                'right_w1': 1.5470196245824397, 'right_w2': 0.8179952551398969, 'right_e0': 1.4545972821123436,
-                'right_e1': 1.5508545765521533}
+                 'right_w1': 1.5470196245824397, 'right_w2': 0.8179952551398969, 'right_e0': 1.4545972821123436,
+                 'right_e1': 1.5508545765521533}
 l2r_l_method1 = {'left_w0': 0.2661456666981193, 'left_w1': 1.398606983354526, 'left_w2': -0.9503010980950138,
                  'left_e0': -1.4043594113090963, 'left_e1': 1.6459613854010489, 'left_s0': -0.16490293469768197,
                  'left_s1': -1.305417650490487}
@@ -349,25 +364,44 @@ l2r_r_method1 = {'right_s0': 0.09587379924283836, 'right_s1': -0.604388430426853
 #  2 flat square base
 #  3 hex base
 
-def adjust_base(gripper, base_classify, method, pre_position):
-    use_hand_to_grip_3(gripper, pre_position)
-    if method == 1 or method == 3:
-        pass
+# def adjust_base(gripper, base_classify, method, pre_position):
+#     use_hand_to_grip_3(gripper, pre_position)
+#     if method == 1 or method == 3:
+#         pass
 
 
+########################################################################################################################
+#
+def taskB():
+    go_to_initial_pose_1()
+    # save_img()
+    left_task_num, right_task_num, left_gripper_task, right_gripper_task = multi_object_recog_2()
+
+    for i in range(left_task_num):
+        print("---------------------------")
+        print("left gripper start")
+        use_hand_to_grip_3('left', left_gripper_task[i].position, left_gripper_task[i].grip_method)
+        if (left_gripper_task[i].classify == -1):
+            observe_at_the_position_5("left", left_gripper_task[i].grip_method)
+        else:
+            move_to_put_place_6('left', left_gripper_task[i].classify, left_gripper_task[i].grip_method)
+        print("left gripper end")
+        print("---------------------------")
+
+    for i in range(right_task_num):
+        print("---------------------------")
+        print("right gripper start")
+        use_hand_to_grip_3('right', right_gripper_task[i].position, right_gripper_task[i].grip_method)
+        if (right_gripper_task[i].classify == -1):
+            observe_at_the_position_5('right', right_gripper_task[i].grip_method)
+        else:
+            move_to_put_place_6('right', right_gripper_task[i].classify, right_gripper_task[i].grip_method)
+        print("right gripper end")
+        print("---------------------------")
 
 
-
-
-
-
-
-
-
-
-
-
-
+taskB()
+# go_to_observe_position('left')
 
 
 ########################################################################################################################
@@ -376,9 +410,8 @@ def adjust_base(gripper, base_classify, method, pre_position):
 # position = np.array([0.7380, -0.1261, 0.16])
 # use_hand_to_grip_3('right', position)
 
-
-print(robot.get_joint())
-
+#
+# print(robot.get_joint())
 
 
 #######################################################################################################################
