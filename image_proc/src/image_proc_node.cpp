@@ -49,17 +49,18 @@ const int MinArea = 150;
 const int MaxArea = 600;
 
 int suppres_min = 955, suppres_max = 1180;
-int spprs_xmin = 500, spprs_xmax = 1570, spprs_ymin = 450, spprs_ymax = 880;
-int MinArea_vtc = 40, MaxArea_vtc = 180;
-int MinArea_clr = 50, MaxArea_clr = 200;
+int spprs_xmin = 600, spprs_xmax = 1470, spprs_ymin = 450, spprs_ymax = 880;
+int MinArea_vtc = 40, MaxArea_vtc = 160;
+int MinArea_clr = 50, MaxArea_clr = 180;
 int MinArea_clr_hori = 100, MaxArea_clr_hori = 350;
 int gray_supp = 120;
-vector<int>edge{500,820,100,450};
+vector<int>edge_right{ 430, 820, 100, 450 };
+vector<int>edge_left{ 660, 1030, 170, 400 };
 
 int iLowH = 0, iHighH = 255, iLowS = 0, iHighS = 255, iLowV = 100, iHighV = 255;
-int iLowH_cup = 0, iHighH_cup = 180, iLowS_cup = 0, iHighS_cup = 30, iLowV_cup = 200, iHighV_cup = 250;
-int iLowH_hand_cup = 0, iHighH_hand_cup = 255, iLowS_hand_cup = 90, iHighS_hand_cup = 255, iLowV_hand_cup = 93, iHighV_hand_cup = 250;
-int iLowH_hand_bottle = 0, iHighH_hand_bottle = 255, iLowS_hand_bottle = 0, iHighS_hand_bottle = 45, iLowV_hand_bottle = 88, iHighV_hand_bottle = 255;
+int iLowH_cup = 0, iHighH_cup = 255, iLowS_cup = 0, iHighS_cup = 15, iLowV_cup = 150, iHighV_cup = 255;
+int iLowH_hand_cup = 0, iHighH_hand_cup = 255, iLowS_hand_cup = 90, iHighS_hand_cup = 255, iLowV_hand_cup = 150, iHighV_hand_cup = 250;
+int iLowH_hand_bottle = 0, iHighH_hand_bottle = 255, iLowS_hand_bottle = 0, iHighS_hand_bottle = 60, iLowV_hand_bottle = 150, iHighV_hand_bottle = 255;
 float avgX, avgY;
 float avgX_res, avgY_res;
 
@@ -125,10 +126,10 @@ public:
 		: nh_(nh), it_(nh)
 	{
 		server_ = nh_.advertiseService("Image_Process_A", &ImgProc::imageProcessCallback, this);
-		sub_left_cam = it_.subscribe("/cameras/left_hand_camera/image", 4, &ImgProc::lWristImgProcessCallbk, this);
-		sub_right_cam = it_.subscribe("/cameras/right_hand_camera/image", 4, &ImgProc::rWristImgProcessCallbk, this);
-		image_color_sub_ = it_.subscribe("/camera/color/image_raw", 4, &ImgProc::imageRealsenseColorCb, this);
-		image_depth_sub_ = it_.subscribe("/camera/aligned_depth_to_color/image_raw", 4, &ImgProc::imageRealsenseDepthCb, this);
+		sub_left_cam = it_.subscribe("/cameras/left_hand_camera/image", 1, &ImgProc::lWristImgProcessCallbk, this);
+		sub_right_cam = it_.subscribe("/cameras/right_hand_camera/image", 1, &ImgProc::rWristImgProcessCallbk, this);
+		image_color_sub_ = it_.subscribe("/camera/color/image_raw", 1, &ImgProc::imageRealsenseColorCb, this);
+		image_depth_sub_ = it_.subscribe("/camera/aligned_depth_to_color/image_raw", 1, &ImgProc::imageRealsenseDepthCb, this);
 
 		realsense_colorImage  = Mat::zeros( 1280, 720, CV_8UC3 );
 		realsense_depthImage = Mat::zeros( 1280, 720, CV_16UC1 );
@@ -297,17 +298,18 @@ public:
 				switch (req.method)
 				{
 					case 0 : result = single(rgbd2, rgbmat);break;
-					case 1 : result = wristRecog(left_color_image, 1, 210);break;
-					case 2 : result = wristRecog(right_color_image, 0, 210);break;
-					case 4 : result = wristRecog(left_color_image, 1, 240);break; // task B
-					case 5 : result = wristRecog(right_color_image, 0, 240);break;
+					case 1 : result = wristRecog(left_color_image, 1, 215);break; // horizontal
+					case 2 : result = wristRecog(right_color_image, 0, 215);break;
+					case 4 : result = wristRecog(left_color_image, 1, 190);break; // verticle
+					case 5 : result = wristRecog(right_color_image, 0, 190);break;
 					case 6 : result = bottle_detect(rgbmat,rgbd2,1);break; // task C // detect cup
 					case 7 : result = bottle_detect(rgbmat,rgbd2,0);break; // detect bottle
-					case 8 : result = recog_on_hand(realsense_colorImage,edge,realsense_depthImage);break;
+					case 8 : result = recog_on_hand(realsense_colorImage,edge_right,realsense_depthImage,1);break;//right up
 					case 9 : result = hand_cup_detect(left_color_image, 1);break;
 					case 10 : result = hand_cup_detect(right_color_image, 0);break;
 					case 11 : result = hand_bottle_detect(left_color_image, 1);break;
 					case 12 : result = hand_bottle_detect(right_color_image, 0);break;
+					case 14 : result = recog_on_hand(realsense_colorImage,edge_left,realsense_depthImage,0);break;//left up
 
 					default: vision_set_judge = true;
 				}
@@ -767,6 +769,7 @@ public:
 		for (int i = 0; i < contours.size(); i++)
 		{
 			boundRect[i] = boundingRect(Mat(contours[i]));
+			if (contours[i].size() > 40)
 			//if (contours[i].size() > MinArea_clr && contours[i].size() < MaxArea_clr)
 			{
 
@@ -801,8 +804,8 @@ public:
 					binaryimg.at<uchar>(j, i) = 255;
 			}
 
-		//cv::imshow("binary", binaryimg);
-		//cv::waitKey(1000);
+		cv::imshow("vertical", binaryimg);
+		cv::waitKey(2000);
 
 		vector<vector<Point>> contours;
 		findContours(binaryimg, contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_NONE);
@@ -817,7 +820,9 @@ public:
 			for (int i = 0; i < contours.size(); i++)
 			{
 				boundRect[i] = minAreaRect(Mat(contours[i]));
-				if (contours[i].size() > MinArea_clr && contours[i].size() < MaxArea_clr)
+				if (contours[i].size() > MinArea_clr && contours[i].size() < MaxArea_clr
+				&& float(boundRect[i].size.height) / float(boundRect[i].size.width) > 0.33 &&
+				float(boundRect[i].size.height) / float(boundRect[i].size.width) < 3)
 				{
 					Moments M = moments(contours[i]);
 					Point2f center;
@@ -852,7 +857,7 @@ public:
 							filename = "./o.jpg";
 							rotate_gjx(colorImg, -angle, center, vertex, filename,50,70);
 
-							int pre_class = predict(filename, "/home/ljq/ros_ws/src/image_proc/param/svm.xml");
+							int pre_class = predict(filename, "/home/ljq/ros_ws/src/image_proc/param/svm_vertical.xml");
 							//cout << "class:" << pre_class << endl;
 
 							vision_set.classify.push_back(pre_class);
@@ -887,7 +892,7 @@ public:
 			}
 			cv::imshow("result", copyimg); 
 			//cv::imshow("colorImg", colorImg);
-			cv::waitKey(1000);
+			cv::waitKey(2000);
 		}
 	}
 
@@ -913,8 +918,8 @@ public:
 					binaryimg.at<uchar>(j, i) = 255;
 			}
 
-		//cv::imshow("binary", binaryimg);
-		//cv::waitKey(1000);
+		cv::imshow("horizontal_bi", binaryimg);
+		cv::waitKey(2000);
 
 		vector<vector<Point>> contours;
 		findContours(binaryimg, contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_NONE);
@@ -925,14 +930,15 @@ public:
 		}
 		else
 		{
+			ROS_INFO("1111");
 			vector<RotatedRect> boundRect(contours.size());
 			for (int i = 0; i < contours.size(); i++)
 			{
 				boundRect[i] = minAreaRect(Mat(contours[i]));
-				if (contours[i].size() > MinArea_clr && contours[i].size() < MaxArea_clr)
+				if (contours[i].size() > MinArea_clr && contours[i].size() < 210/*MaxArea_clr*/
+				&& float(boundRect[i].size.height) / float(boundRect[i].size.width) > 0.33 &&
+				float(boundRect[i].size.height) / float(boundRect[i].size.width) < 3)
 				{
-					vision_set.issuccess = 1;
-					vision_set.grip_method.push_back(0);
 
 					Point2f vertex[4];
 					boundRect[i].points(vertex);
@@ -959,28 +965,34 @@ public:
 
 					//cout << "angle:" << angle << endl;
 					//cout << endl;
-					
-					vector<float>temp;
-					temp.push_back(center.x);
-					temp.push_back(center.y);
-					temp.push_back(1000);
-					temp.push_back(angle);
-					vision_set.cntrpoint.push_back(temp);
-					int objheight = depImg.at<unsigned short int>(int(center.y), int(center.x));
-					if (objheight < 15)
+
+					if (center.x > 0 && center.y > 0)
 					{
-						vision_set.classify.push_back(2);
-					}
-					else
-					{
-						vision_set.classify.push_back(-1);
+						vision_set.issuccess = 1;
+						vision_set.grip_method.push_back(0);
+						vector<float> temp;
+						temp.push_back(center.x);
+						temp.push_back(center.y);
+						temp.push_back(1000);
+						temp.push_back(angle);
+						vision_set.cntrpoint.push_back(temp);
+						// ROS_INFO("%d",i);
+						int objheight = depImg.at<unsigned short int>(int(center.y), int(center.x));
+						// ROS_INFO("%d",objheight);
+						if (objheight < 15)
+						{
+							vision_set.classify.push_back(2);
+						}
+						else
+						{
+							vision_set.classify.push_back(-1);
+						}
 					}
 
-					
 				}
 			}
-			cv::imshow("result", copyimg);
-			cv::waitKey(1000);
+			cv::imshow("horizontal", copyimg);
+			cv::waitKey(2000);
 		}
 	}
 
@@ -1019,6 +1031,7 @@ public:
 		find_stand_obj(colorImg, depobj);
 		findhorizontal(colorImg, depobj);
 		cout << "the size of vision_set is:" << vision_set.cntrpoint.size() << endl;
+		//cout << "the size of  is:" << vision_set.cntrpoint.size() << endl;
 		if (vision_set.cntrpoint.size() == 0)
 		{
 			cout << "no objects!" << endl;
@@ -1026,6 +1039,10 @@ public:
 		}
 		for (int i = 0; i < vision_set.cntrpoint.size(); i++)
 		{
+
+			ROS_INFO("No.%d:  XY-pixel: %f, %f  Class: %d  Grip_Method: %d", i,
+					 vision_set.cntrpoint[i][0], vision_set.cntrpoint[i][1],
+					 vision_set.classify[i], vision_set.grip_method[i]);
 			vision_set.cntrpoint[i][2] = depImg.at<unsigned short int>(int(vision_set.cntrpoint[i][1]), int(vision_set.cntrpoint[i][0]))*0.001;
 			vision_set.cntrpoint[i][0] = -(vision_set.cntrpoint[i][0] - camera_cx) * vision_set.cntrpoint[i][2] / camera_fx;
 			vision_set.cntrpoint[i][1] = (vision_set.cntrpoint[i][1] - camera_cy) * vision_set.cntrpoint[i][2] / camera_fy;
@@ -1040,15 +1057,16 @@ public:
 			// cout << endl;
 			// cout << "class:" << vision_set.classify[i] << endl;
 			// cout << "grip method:" << vision_set.grip_method[i] << endl;
-			ROS_INFO("No.%d:  XYZ-theta: %f, %f, %f, %f  Class: %d  Grip_Method: %d", i, 
-					vision_set.cntrpoint[i][0], vision_set.cntrpoint[i][1], vision_set.cntrpoint[i][2], vision_set.cntrpoint[i][3],
-					vision_set.classify[i], vision_set.grip_method[i]);
+			ROS_INFO("No.%d:  XYZ-theta: %f, %f, %f, %f  Class: %d  Grip_Method: %d", i,
+					 vision_set.cntrpoint[i][0], vision_set.cntrpoint[i][1], vision_set.cntrpoint[i][2], vision_set.cntrpoint[i][3],
+					 vision_set.classify[i], vision_set.grip_method[i]);
+
 		}
 	}
 	
 	
 	/*recognition  by operating hands*/
-vector<float>  hand_process(Mat colorImg/*,vector<int>area*/)
+vector<float> hand_process(Mat colorImg, vector<int>area, int padd_length,string pre_path)
 {
 	vector<float> result;
 	result.resize(4);
@@ -1080,26 +1098,33 @@ vector<float>  hand_process(Mat colorImg/*,vector<int>area*/)
 	else
 	{
 		vector<RotatedRect> boundRect(contours.size());
+		vector<Point2f> center_set;
+		vector<float> angle_set;
+		vector<vector<Point2f>> vertex_set;
+
 		for (int i = 0; i < contours.size(); i++)
 		{
 			boundRect[i] = minAreaRect(Mat(contours[i]));
-			if (contours[i].size() > 120 && contours[i].size() < 500 && 
-				float(boundRect[i].size.height) / float(boundRect[i].size.width) > 1 / 3 &&
+			if (contours[i].size() > area[0] && contours[i].size() < area[1] &&
+				float(boundRect[i].size.height) / float(boundRect[i].size.width) > 0.33 &&
 				float(boundRect[i].size.height) / float(boundRect[i].size.width) < 3)
 			{
+				//cout << "ratio:" << float(boundRect[i].size.height) / float(boundRect[i].size.width) << endl;
 				Point2f vertex[4];
 				boundRect[i].points(vertex);
-
 				for (int j = 0; j < 4; j++)
 				{
 					line(copyimg, vertex[j], vertex[(j + 1) % 4], Scalar(0, 0, 255));
 				}
 				drawContours(copyimg, contours, i, Scalar(0, 0, 255), 1);
+				//cv::imshow("drawContours", copyimg);
+				//cv::waitKey(0);
 				Moments M = moments(contours[i]);
 				Point2f center;
 				center.x = M.m10 / M.m00;
 				center.y = M.m01 / M.m00;
 				circle(copyimg, center, 3, Scalar(0, 0, 255), -1);
+
 				cout << "(" << center.x << "," << center.y << ")" << "     ";
 				cout << "contours size:" << contours[i].size() << endl;
 
@@ -1111,46 +1136,72 @@ vector<float>  hand_process(Mat colorImg/*,vector<int>area*/)
 
 				cout << "angle:" << angle << endl;
 				cout << endl;
-
-				//string filename;
-				//filename = "./GR/secondlook2/" + to_string(cnt) + ".jpg";
-				//cnt++;
-				//rotate_gjx(colorImg, -angle, center, vertex, filename,120,120);
+				
 				std::string filename;
 				filename = "./o.jpg";
-				rotate_gjx(colorImg, -angle, center, vertex, filename, 120, 120);
-				int pre_class = predict(filename, "/home/ljq/ros_ws/src/image_proc/param/svm_hand.xml");
-				cout<<"class="<<pre_class<<endl;
-				if(pre_class!=4)
+				rotate_gjx(colorImg, -angle, center, vertex, filename, 120, padd_length);
+				cout << pre_path << endl;
+				int pre_class = predict(filename, pre_path);
+				//cout << "class=" << pre_class << endl;
+				if (pre_class != 4)
 				{
-					result[0]=pre_class;
+					result[0] = pre_class;
+					ROS_INFO("class=%d",pre_class);
 				}
-				//cout<<"class="<<pre_class<<endl;
-				//ROS_INFO("class= %d", pre_class);
-
 			}
 		}
-		//cv::imshow("result", copyimg);
-		//cv::waitKey(0);
+		cv::imshow("result", copyimg);
+		cv::waitKey(1000);
 	}
 	return result;
 }
-
-vector<float> recog_on_hand(Mat colorImg, vector<int>edge,Mat depImg)
+vector<float>recog_on_hand(Mat colorImg, vector<int>edge, Mat depImg, int method)
 {
-
 	vector<float> result;
 	result.resize(4);
+
+	vector<int>dis;
+	vector<int>area2bin;//找区域时候的二值化的面积限制
+	vector<int>area;//物体（工件or底座）的面积限制
+	string pre_path;
+	int padd_length;
+	//0--left 1--right  2--bottom
+	if (method == 0)
+	{
+		dis = { 400,660 };
+		area2bin = { 1000,5000 };
+		//area = { 120 ,500 };//right
+		area = { 140 ,500 };//left
+		padd_length = 120;
+		pre_path = "/home/ljq/ros_ws/src/image_proc/param/svm_handleft.xml";
+	}
+	if (method == 1)
+	{
+		dis = { 400,660 };
+		area2bin = { 1000,5000 };
+		//area = { 120 ,500 };//right
+		area = { 140 ,500 };//left
+		padd_length = 120;
+		pre_path = "/home/ljq/ros_ws/src/image_proc/param/svm_handright.xml";
+	}
+	//is bottom
+	else if (method == 2)
+	{
+		dis = { 400,660 };
+		area2bin = { 1000,5000 };
+		area = { 400,800 };
+		padd_length = 200;
+	}
 	Mat copyimg = colorImg.clone();
 	Mat binaryimg = Mat::zeros(colorImg.rows, colorImg.cols, CV_8UC1);
-
+	cout << "colorImg.size()" << colorImg.cols << "*" << colorImg.rows << endl;
 	Mat grayImg;
 	cvtColor(colorImg, grayImg, COLOR_BGR2GRAY);
 	int x_min = edge[0], x_max = edge[1], y_min = edge[2], y_max = edge[3];
 	for (int i = x_min; i < x_max; i = i + 1)
 		for (int j = y_min; j < y_max; j = j + 1)
 		{
-			if (depImg.at<unsigned short int>(j,i) > 400 && depImg.at<unsigned short int>(j, i) < 660)
+			if (depImg.at<unsigned short int>(j, i) > dis[0] && depImg.at<unsigned short int>(j, i) < dis[1])
 			{
 				binaryimg.at<uchar>(j, i) = 255;
 			}
@@ -1162,7 +1213,7 @@ vector<float> recog_on_hand(Mat colorImg, vector<int>edge,Mat depImg)
 	findContours(binaryimg, contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_NONE);
 	if (!contours.size())
 	{
-	
+
 		cout << "contours not exits" << endl;
 		return result;
 	}
@@ -1171,14 +1222,14 @@ vector<float> recog_on_hand(Mat colorImg, vector<int>edge,Mat depImg)
 		vector<Rect> boundRect(contours.size());
 		for (int i = 0; i < contours.size(); i++)
 		{
-			if (contours[i].size() > 1000)
+			if (contours[i].size() > area2bin[0] && contours[i].size() < area2bin[1])
 			{
 				cout << contours[i].size() << endl;
 				boundRect[i] = boundingRect(Mat(contours[i]));
 				Mat dst;
 				dst = colorImg(boundRect[i]);
-				result= hand_process(dst);
-			}				
+				result = hand_process(dst, area, padd_length,pre_path);
+			}
 		}
 
 		//cv::imshow("result", copyimg); 
@@ -1186,9 +1237,16 @@ vector<float> recog_on_hand(Mat colorImg, vector<int>edge,Mat depImg)
 	}
 	return result;
 }
+
 	
 void taskB(Mat colorImg, Mat depImg)
 {
+	//clear the struct vision
+	vision_set.issuccess = 0;
+	vision_set.classify.clear();
+	vision_set.cntrpoint.clear();
+	vision_set.grip_method.clear();
+
 	Mat depobj, depImgBG;
 	depthimg_save2(depImg, "guojiaxin.bmp");
 	imwrite("guojiaxin.jpg", colorImg);
@@ -1235,14 +1293,14 @@ void taskB(Mat colorImg, Mat depImg)
 				Point2f center;
 				center.x = M.m10 / M.m00;
 				center.y = M.m01 / M.m00;
-				cout << "contour.size=" << contours[i].size() << endl;
+				// cout << "contour.size=" << contours[i].size() << endl;
 
 				float angle;
 				if (boundRect[i].size.height > boundRect[i].size.width)
 					angle = 90.0 + abs(boundRect[i].angle);
 				else
 					angle = abs(boundRect[i].angle);
-				cout << "angle:" << angle << endl;
+				// cout << "angle:" << angle << endl;
 
 
 				Point2f vertex[4];
@@ -1253,7 +1311,7 @@ void taskB(Mat colorImg, Mat depImg)
 					filename = "./o.jpg";
 					rotate_gjx(colorImg, -angle, center, vertex, filename, 80, 100); 
 					
-					int pre_class = predict(filename, "/home/ljq/ros_ws/src/image_proc/param/svm_bttm.xml");
+					int pre_class = predict(filename, "/home/ljq/ros_ws/src/image_proc/param/svm_vbttm.xml");
 					cout << "class:" << pre_class << endl;
 
 					if (pre_class != 9)
@@ -1291,8 +1349,7 @@ void taskB(Mat colorImg, Mat depImg)
 				}
 				drawContours(copyimg, contours, i, Scalar(0, 0, 255), 1);
 				circle(copyimg, center, 3, Scalar(0, 0, 255), -1);
-				cout << "(" << center.x << "," << center.y << ")"
-					<< "     ";
+				//cout << "(" << center.x << "," << center.y << ")" << ;
 				//cout << contours[i].size() << endl;
 				
 			}
@@ -1300,13 +1357,30 @@ void taskB(Mat colorImg, Mat depImg)
 		cv::imshow("result", copyimg);
 		cv::waitKey(1000);
 	}
+	
 	findhorizontal(colorImg, depobj);
-}
 
+	cout << "the size of vision_set is:" << vision_set.cntrpoint.size() << endl;
+	if (vision_set.cntrpoint.size() == 0)
+	{
+		cout << "no objects!" << endl;
+		vision_set.issuccess = 0;
+	}
+	for (int i = 0; i < vision_set.cntrpoint.size(); i++)
+	{
+		vision_set.cntrpoint[i][2] = depImg.at<unsigned short int>(int(vision_set.cntrpoint[i][1]), int(vision_set.cntrpoint[i][0])) * 0.001;
+		vision_set.cntrpoint[i][0] = -(vision_set.cntrpoint[i][0] - camera_cx) * vision_set.cntrpoint[i][2] / camera_fx;
+		vision_set.cntrpoint[i][1] = (vision_set.cntrpoint[i][1] - camera_cy) * vision_set.cntrpoint[i][2] / camera_fy;
+
+		ROS_INFO("No.%d:  XYZ-theta: %f, %f, %f, %f  Class: %d  Grip_Method: %d", i,
+				 vision_set.cntrpoint[i][0], vision_set.cntrpoint[i][1], vision_set.cntrpoint[i][2], vision_set.cntrpoint[i][3],
+				 vision_set.classify[i], vision_set.grip_method[i]);
+	}
+}
 
 /************************************/
   
-	const int caijian_x = 500, caijian_y = 500, caijian_w = 1100, caijian_h = 450;
+	const int caijian_x = 500, caijian_y = 500, caijian_w = 1100, caijian_h = 400;
 
 	vector<float> bottle_detect(Mat &colorImg, Mat &depthImg, int flag){		
 		vector<Point> approx;
@@ -1326,32 +1400,32 @@ void taskB(Mat colorImg, Mat depImg)
 
 		Rect rect1(caijian_x, caijian_y, caijian_w, caijian_h); 
 		colorImg = colorImg(rect1);
-		imshow("colorImg",colorImg);
-
+		// imshow("colorImg",colorImg);
 		cvtColor(colorImg, imgHSV, COLOR_BGR2HSV);
-		Mat element = getStructuringElement(MORPH_RECT, Size(1, 1));
-		Mat element1 = getStructuringElement(MORPH_RECT, Size(4, 4));
+		Mat element = getStructuringElement(MORPH_RECT, Size(2, 2));
+		Mat element1 = getStructuringElement(MORPH_RECT, Size(6, 6));
 		inRange(imgHSV, Scalar(iLowH, iLowS, iLowV), Scalar(iHighH, iHighS, iHighV), imgThresholded); //Threshold the image
 		dilate(imgThresholded, imgThresholded, element);
 		erode(imgThresholded, imgThresholded, element1);
-		imshow("imgThresholded",imgThresholded);
+		// imshow("imgThresholded",imgThresholded);
 		results = counter_detect(imgThresholded,colorImg,depthImg);
-
+		//cout<< "results"<<results<< endl;
 		if(flag == 1){
 			return results;
 		}
 		//cout<<"res"<<results<<endl;
 		cvtColor(colorImg, imgHSV_bottle, COLOR_BGR2HSV);
-		imshow("colorImg1",colorImg);
+		// imshow("colorImg1",colorImg);
 
 		inRange(imgHSV_bottle, Scalar(iLowH_cup, iLowS_cup, iLowV_cup), Scalar(iHighH_cup, iHighS_cup, iHighV_cup), imgThresholded_cup); //Threshold the image
-		imshow("imgThresholded1",imgThresholded_cup);
+		//imshow("imgThresholded1",imgThresholded_cup);
 
 		dilate(imgThresholded_cup, imgThresholded_cup, element);
 		erode(imgThresholded_cup, imgThresholded_cup, element1);
-		waitKey(1000);	
+		imshow("imgThresholded1",imgThresholded_cup);
+
 		results = counter_detect(imgThresholded_cup,colorImg,depthImg);
-		// cout << "res0: " << results[0] <<"res1: " << results[1] << "res2: " << results[2] << "res3: " << results[3] << endl;
+		cout << "res0: " << results[0] <<"res1: " << results[1] << "res2: " << results[2] << "res3: " << results[3] << endl;
 
 		return results;
 	}
@@ -1373,8 +1447,9 @@ void taskB(Mat colorImg, Mat depImg)
 		Mat element1_cup = getStructuringElement(MORPH_RECT, Size(6, 6));
 		erode(imgThresholded_cup, imgThresholded_cup, element_cup);
 		dilate(imgThresholded_cup, imgThresholded_cup, element1_cup);
-
 		results = counter_detect(imgThresholded_cup, colorImg, depthImg);
+		imshow("bottle_detted",imgThresholded_cup);
+
 		return results;
 	}
 
@@ -1394,54 +1469,67 @@ void taskB(Mat colorImg, Mat depImg)
 			// ROS_INFO("area: %f", g_dConArea);
 			g_dConArea = fabs(contourArea(contours[i], true));
 
-			if (g_dConArea > 600.0 && g_dConArea < 15000.0)
+			if (g_dConArea > 2000.0 && g_dConArea < 15000.0)
 			{	
+				//imshow("1",imgThresholded);
+
 				// ROS_INFO("i: %d", i);
 				Rect boundRect;
 				boundRect = boundingRect(Mat(contours[i]));
+				//imshow("2",imgThresholded);
 
-					rectangle(imgThresholded, boundRect, Scalar(255, 255, 255));
-					for (int i = boundRect.x; i < boundRect.x+boundRect.width; i++){
-						for (int j = boundRect.y; j <boundRect.y+boundRect.height; j++){
-							if (settled_z > depthImg.at<float>(int(avgY), int(avgX))*0.001){
-								settled_z = depthImg.at<float>(int(avgY), int(avgX))*0.001;
-							}
-						}
-					}
-					avgX = (boundRect.x+boundRect.x+boundRect.width)/2;
-					avgY = (boundRect.y+boundRect.y+boundRect.height)/2;
-					avgX = avgX + caijian_x;
-					avgY = avgY + caijian_y;
-					// ROS_INFO("detected_avg: %f, %f,%f", avgX, avgY, settled_z);
+				rectangle(imgThresholded, boundRect, Scalar(255, 255, 255));
+				// for (int i = boundRect.x; i < boundRect.x+boundRect.width; i++){
+				// 	for (int j = boundRect.y; j <boundRect.y+boundRect.height; j++){
+				// 		if (settled_z > depthImg.at<float>(int(j), int(i))*0.001){
+				// 			settled_z = depthImg.at<float>(int(j), int(i))*0.001;
+				// 		}
+				// 	}
+				// }
+				ROS_INFO("settled_z: %f", settled_z);
+				imshow("3",imgThresholded);
+				avgX = (boundRect.x+boundRect.x+boundRect.width)/2;
+				avgY = (boundRect.y+boundRect.y+boundRect.height)/2;
+				// if (avgX>=550){
+				// 	avgX = avgX - 20;
+				// 	avgY = avgY + 15;
+				// } 
+				// else if (avgX < 550){
+				// 	avgX = avgX + 15;
+				// 	avgY = avgY + 15;
+				// } 
+				avgX = avgX + caijian_x;
+				avgY = avgY + caijian_y;
+				// ROS_INFO("detected_avg: %f, %f,%f", avgX, avgY, settled_z);
 
-					minEnclosingCircle(Mat(contours[i]), center, radius);
-					avgX_cir = center.x;
-					avgY_cir = center.y;
+				minEnclosingCircle(Mat(contours[i]), center, radius);
+				avgX_cir = center.x;
+				avgY_cir = center.y;
 
-					settled_z = depthImg.at<float>(int(avgY), int(avgX))*0.001;
-					avgX_cir = avgX_cir + caijian_x;
-					avgY_cir = avgY_cir + caijian_y;
+				settled_z = depthImg.at<float>(int(avgY), int(avgX))*0.001;
+				avgX_cir = avgX_cir + caijian_x;
+				avgY_cir = avgY_cir + caijian_y;
 
-					avgX_res = -(avgX - camera_cx) * settled_z / camera_fx;
-					avgY_res = (avgY - camera_cy) * settled_z / camera_fy;
+				avgX_res = -(avgX - camera_cx) * settled_z / camera_fx;
+				avgY_res = (avgY - camera_cy) * settled_z / camera_fy;
 
-					results[0] = avgX_res;
-					results[1] = avgY_res;
-					results[2] = settled_z;
+				results[0] = avgX_res;
+				results[1] = avgY_res;
+				results[2] = settled_z;
 
-					// ROS_INFO("detected: %f, %f, %f", avgX_res, avgY_res, settled_z);
-					
-					Point root_points[1][4];
-					root_points[0][0] = Point2i(boundRect.x, boundRect.y);
-					root_points[0][1] = Point2i(boundRect.x+boundRect.width,boundRect.y);
-					root_points[0][2] = Point2i(boundRect.x+boundRect.width, boundRect.y+boundRect.height);
-					root_points[0][3] = Point2i(boundRect.x,boundRect.y+boundRect.height);
-					const Point* ppt[1] = { root_points[0] };
-					int npt[] = { 4 };
-					polylines(colorImg, ppt, npt, 1, 1, Scalar(0, 0, 0), 1, 8, 0);
-					fillPoly(colorImg, ppt, npt, 1, Scalar(0, 0, 0));
-					// imshow("rect",colorImg);
-					// waitKey(1000);
+				// ROS_INFO("detected: %f, %f, %f", avgX_res, avgY_res, settled_z);
+				
+				Point root_points[1][4];
+				root_points[0][0] = Point2i(boundRect.x, boundRect.y);
+				root_points[0][1] = Point2i(boundRect.x+boundRect.width,boundRect.y);
+				root_points[0][2] = Point2i(boundRect.x+boundRect.width, boundRect.y+boundRect.height);
+				root_points[0][3] = Point2i(boundRect.x,boundRect.y+boundRect.height);
+				const Point* ppt[1] = { root_points[0] };
+				int npt[] = { 4 };
+				polylines(colorImg, ppt, npt, 1, 1, Scalar(0, 0, 0), 1, 8, 0);
+				fillPoly(colorImg, ppt, npt, 1, Scalar(0, 0, 0));
+				// imshow("rect",colorImg);
+				// waitKey(1000);
 
 			}
 		}
@@ -1477,27 +1565,32 @@ void taskB(Mat colorImg, Mat depImg)
         for (int i = 0; i < contours.size(); i++)
         {
             g_dConArea = fabs(contourArea(contours[i], true));
-            if (g_dConArea > 600)
+            if (g_dConArea > 3000 && g_dConArea < 30000)
             {
-                Rect boundRect;
-                boundRect = boundingRect(Mat(contours[i]));
-                rectangle(imgThresholded, boundRect, Scalar(255, 255, 255));
 
-                avgX = (boundRect.x+boundRect.x+boundRect.width)/2;
-                avgY = (boundRect.y+boundRect.y+boundRect.height)/2;
-                if (float(boundRect.width)/float(boundRect.height)>0.8 &&float(boundRect.width)/float(boundRect.height)<1.2){
-                    ROS_INFO("detected_avg: %f, %f", avgX, avgY);
-                    minEnclosingCircle(Mat(contours[i]), center, radius);
-                    avgX_cir = center.x;
-                    avgY_cir = center.y;
-					settled_z = 0.215;
-                    avgX_res = (avgX_cir - camera_cx_wrist) * settled_z / camera_fx_wrist;
-                    avgY_res = (avgY_cir - camera_cy_wrist) * settled_z / camera_fx_wrist;
+				Rect boundRect;
+				boundRect = boundingRect(Mat(contours[i]));
+				if(boundRect.width / boundRect.height >0.5 && boundRect.width/boundRect.height <1.5){
+					rectangle(imgThresholded, boundRect, Scalar(255, 255, 255));
+					imshow("hand_counter_detec", imgThresholded);
+					waitKey(1000);
+					avgX = (boundRect.x+boundRect.x+boundRect.width)/2;
+					avgY = (boundRect.y+boundRect.y+boundRect.height)/2;
+					ROS_INFO("Hand_Bottle_res: %f, %f", avgX, avgY);
+					if (float(boundRect.width)/float(boundRect.height)>0.8 &&float(boundRect.width)/float(boundRect.height)<1.2){
+						ROS_INFO("detected_avg: %f, %f", avgX, avgY);
+						minEnclosingCircle(Mat(contours[i]), center, radius);
+						avgX_cir = center.x;
+						avgY_cir = center.y;
+						settled_z = 0.215;
+						avgX_res = (avgX_cir - camera_cx_wrist) * settled_z / camera_fx_wrist;
+						avgY_res = (avgY_cir - camera_cy_wrist) * settled_z / camera_fx_wrist;
 
-                    results[0] = avgX_res;
-                    results[1] = avgY_res;
-                    results[2] = settled_z;
-                }
+						results[0] = avgX_res;
+						results[1] = avgY_res;
+						results[2] = settled_z;
+					}
+				}
             }
         }
         return results;
@@ -1514,8 +1607,8 @@ void taskB(Mat colorImg, Mat depImg)
         vector<Vec4i> hierarchy;
         cvtColor(colorImg, colorImg, COLOR_BGR2HSV);
         inRange(colorImg, Scalar(iLowH_hand_cup, iLowS_hand_cup, iLowV_hand_cup), Scalar(iHighH_hand_cup, iHighS_hand_cup, iHighV_hand_cup), imgThresholded_cup); //Threshold the image
-        Mat element_cup = getStructuringElement(MORPH_RECT, Size(3, 3));
-        Mat element1_cup = getStructuringElement(MORPH_RECT, Size(5, 5));
+        Mat element_cup = getStructuringElement(MORPH_RECT, Size(1, 1));
+        Mat element1_cup = getStructuringElement(MORPH_RECT, Size(6, 6));
 
         erode(imgThresholded_cup, imgThresholded_cup, element_cup);
         dilate(imgThresholded_cup, imgThresholded_cup, element1_cup);
@@ -1536,19 +1629,19 @@ void taskB(Mat colorImg, Mat depImg)
         vector<Mat> hsvSplit_cup;
         vector<vector<Point>> contours;
         vector<Vec4i> hierarchy;
-		imshow("hand_bottle_color", colorImg);
+		// imshow("hand_bottle_color", colorImg);
         cvtColor(colorImg, colorImg, COLOR_BGR2HSV);
 
         inRange(colorImg, Scalar(iLowH_hand_bottle, iLowS_hand_bottle, iLowV_hand_bottle), Scalar(iHighH_hand_bottle, iHighS_hand_bottle, iHighV_hand_bottle), imgThresholded_bottle); //Threshold the image
         Mat element_cup = getStructuringElement(MORPH_RECT, Size(3,3));
         Mat element1_cup = getStructuringElement(MORPH_RECT, Size(6, 6));
-		imshow("hand_bottle_detect", imgThresholded_bottle);
+		//imshow("hand_bottle_detect", imgThresholded_bottle);
         erode(imgThresholded_bottle, imgThresholded_bottle, element_cup);
         dilate(imgThresholded_bottle, imgThresholded_bottle, element1_cup);
         Point2f center;
         float radius;
         results = hand_counter_detect(imgThresholded_bottle, flag);
-		
+		imshow("hand_cup_detect", imgThresholded_bottle);
 		ROS_INFO("Hand_bottle_detect end");
         return results;
     }

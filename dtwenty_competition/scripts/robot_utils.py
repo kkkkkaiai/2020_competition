@@ -90,8 +90,8 @@ class RobotInit:
         base_tf = np.dot(self.translation_matrix, camera_tf)
         return base_tf[0:3].reshape(-1)
 
-    def baxter_ik_move(self, limb, position, orientation=np.array([-3.14, 0, -3.14]),
-                       offset=np.array([0, 0, 0]), head_camera='no', tag='free', timeout=15.0, mode='detect'):
+    def baxter_ik_move(self, limb, position, orientation=np.array([-3.14, 0, -3.14]), tag='free', joint_w2_move='no',
+                       joint_w2=0, offset=np.array([0, 0, 0]),  head_camera='no', timeout=15.0, mode='detect'):
         node = "ExternalTools/" + limb + "/PositionKinematicsNode/IKService"
         ik_service = rospy.ServiceProxy(node, SolvePositionIK)
         ik_request = SolvePositionIKRequest()
@@ -127,6 +127,9 @@ class RobotInit:
             limb_joints = dict(zip(ik_response.joints[0].name, ik_response.joints[0].position))
             # print(limb_joints)
             # move limb
+            if(joint_w2_move=='yes'):
+                joint = limb + "_w2"
+                limb_joints[joint] = joint_w2
             baxter_interface.Limb(limb).move_to_joint_positions(limb_joints)
             if(mode == "detect"):
                 return True
@@ -199,7 +202,7 @@ class RobotInit:
              endpoint_orientation[3]])
         return endpoint_euler
 
-    def set_j(self, limb, joint_name, delta, threshold=0.01, flag='pure'):  # limb:left/right joint_name:w2
+    def set_j(self, limb, joint_name, delta, flag='pure', threshold=0.01):  # limb:left/right joint_name:w2
         current_position = limb.joint_angle(joint_name)
         if flag=='pure':
             goal = delta

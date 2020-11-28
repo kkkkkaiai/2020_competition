@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<launch>
+
+
+  <node name="image_process" pkg="image_proc" type="image_proc_node" respawn="false"/>
+  
+
+</launch>
