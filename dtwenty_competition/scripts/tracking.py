@@ -59,7 +59,7 @@ start_z = 0.0
 target_z = start_z - 0.07
 part = 5
 
-x, y, z = generate_round_points(0.67, 0.33, start_z, target_z, 0.08, interval)  # 0.6 Test
+x, y, z = generate_round_points(0.643, 0.001, start_z, target_z, 0.08, interval)  # 0.6 Test
 
 
 def z_cut(start_z, target_z, lens, part):

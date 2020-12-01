@@ -53,10 +53,11 @@ class RobotInit:
 
         self.left = baxter_interface.Gripper('left', CHECK_VERSION)
         self.right = baxter_interface.Gripper('right', CHECK_VERSION)
-        self.left.set_dead_band(0.1)
-        self.right.set_dead_band(0.1)
+        self.left.set_dead_band(0.01)
+        self.right.set_dead_band(0.01)
         self.limb_right = baxter_interface.Limb('right')
         self.limb_left = baxter_interface.Limb('left')
+        self.safe_area = 0.06
 
         kinect_param_file = '/home/ljq/ros_ws/src/kinect_baxter_calibration/files/kinect_calibration.yaml'
         with open(kinect_param_file, 'r') as f:
@@ -91,7 +92,7 @@ class RobotInit:
         return base_tf[0:3].reshape(-1)
 
     def baxter_ik_move(self, limb, position, orientation=np.array([-3.14, 0, -3.14]), tag='free', joint_w2_move='no',
-                       joint_w2=0, offset=np.array([0, 0, 0]),  head_camera='no', timeout=15.0, mode='detect'):
+                       joint_w2=0, offset=np.array([0, 0, 0]), head_camera='no', timeout=15.0, mode='detect'):
         node = "ExternalTools/" + limb + "/PositionKinematicsNode/IKService"
         ik_service = rospy.ServiceProxy(node, SolvePositionIK)
         ik_request = SolvePositionIKRequest()
@@ -100,7 +101,7 @@ class RobotInit:
         position += offset
         # print(position)
         if tag == 'taskA' or tag == 'taskB':
-            position[2] = -0.038    #  long: -0.037
+            position[2] = -0.038  # long: -0.037
         elif tag == 'taskC':
             position[2] = 0.040
 
@@ -127,19 +128,17 @@ class RobotInit:
             limb_joints = dict(zip(ik_response.joints[0].name, ik_response.joints[0].position))
             # print(limb_joints)
             # move limb
-            if(joint_w2_move=='yes'):
+            if (joint_w2_move == 'yes'):
                 joint = limb + "_w2"
                 limb_joints[joint] = joint_w2
             baxter_interface.Limb(limb).move_to_joint_positions(limb_joints)
-            if(mode == "detect"):
+            if (mode == "detect"):
                 return True
         else:
             print "requested move =", position, orientation
-            if(mode == "detect"):
+            if (mode == "detect"):
                 return False
             sys.exit("ERROR - baxter_ik_move - No valid joint configuration found")
-
-
 
     def go_to_initial_pose(self):
         # initial_pose_left = np.array([0.525, 0.568, 0.171])
@@ -204,15 +203,15 @@ class RobotInit:
 
     def set_j(self, limb, joint_name, delta, flag='pure', threshold=0.01):  # limb:left/right joint_name:w2
         current_position = limb.joint_angle(joint_name)
-        if flag=='pure':
+        if flag == 'pure':
             goal = delta
         else:
             goal = current_position + delta
-        if abs(goal) >= 3.05:
+        if abs(goal) >= 3.09:
             if goal > 0:
-                goal = goal - 3.05 * 2
+                goal = goal - 3.09 * 2
             else:
-                goal = goal + 3.05 * 2
+                goal = goal + 3.09 * 2
         joint_command = {joint_name: goal}
         # while goal-current_position >= threshold:
         #     limb.set_joint_positions(joint_command)
@@ -220,13 +219,28 @@ class RobotInit:
         limb.move_to_joint_positions(joint_command)
 
     def cal_gripper_theta(self, theta, gripper):
+        offset = -0.1
         judge = 0
-        if gripper=='right':
+        if gripper == 'right':
             judge = 1
-        return self.get_joint()[judge][gripper+"_w2"] - ((theta/180)*3.1415926-3.1415926/2)
+            offset = 0.1
+        return self.get_joint()[judge][gripper + "_w2"] - ((theta / 180) * 3.1415926 - 3.1415926 / 2) + offset
         # return 1.8642-0.017*theta
 
 
+    def gripper_judge(self, x, y, classify):
+        if (classify < 2):
+            y_left = 1.913 * x * x - 1.422 * x - 0.1771 + self.safe_area
+            if (y > y_left):
+                return 'left'
+            else:
+                return 'right'
+        else:
+            y_right = -1.913 * x * x + 1.422 * x + 0.1771 - self.safe_area
+            if (y < y_right):
+                return 'right'
+            else:
+                return 'left'
 
 if __name__ == "__main__":
     rospy.init_node("control_node", anonymous=True)

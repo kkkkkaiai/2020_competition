@@ -41,8 +41,8 @@ client = rospy.ServiceProxy(service_name, ImageProcSrv)
 offset = np.array([0.05, 0.0, 0.0])
 # offset = np.array([0.0, 0.0, 0.0])
 
-robot.limb_left.set_joint_position_speed(0.7)
-robot.limb_right.set_joint_position_speed(0.7)
+robot.limb_left.set_joint_position_speed(0.5)
+robot.limb_right.set_joint_position_speed(0.5)
 #######################################################################################################################
 
 # observation position
@@ -92,7 +92,7 @@ def save_img():
         print("saved")
 
 
-# save_img()
+#save_img()
 
 # collect image
 ########################################################################################################################
@@ -134,9 +134,14 @@ class object_sort:
         self.sort()
         size = len(self.object_list)
         able_observe_pose = size
-        # base_pose = size
+        overlap_pose = size
         # able_observe_judge = True
         # base_judge = True
+
+        for i in range(size):
+            if self.object_list[i].classify > -2:
+                overlap_pose = i
+                break
 
         for i in range(size):
             # print(self.object_list[i].position, self.object_list[i].classify)
@@ -148,7 +153,7 @@ class object_sort:
             #     base_judge = False
             #     base_pose = i
 
-        return able_observe_pose, size, self.object_list
+        return overlap_pose, able_observe_pose, size, self.object_list
 
 
 # assign task
@@ -174,20 +179,24 @@ def go_to_initial_pose_1():
 # 2 recognize all the object and assign task
 def multi_object_recog_2():
     rospy.loginfo("multi_object_recog_2 start")
-    # client.wait_for_service()
+    client.wait_for_service()
     request = ImageProcSrvRequest()
     request.method = 3
     # rospy.loginfo(request)
-    time.sleep(1)
+
     response = client.call(request)
     if isinstance(response, ImageProcSrvResponse):
         obj_list = object_sort(response)
         # obj_list.print_objs()
 
-        able_observe_pose, size, object_list = obj_list.assign_task()
+        overlap_pose, able_observe_pose, size, object_list = obj_list.assign_task()
+        print(overlap_pose)
         # print(able_observe_pose)
         print('----------------------------------------------')
-        for i in range(able_observe_pose):
+        for i in range(overlap_pose):
+            object_list[i].print_object()
+        print('----------------------------------------------')
+        for i in range(overlap_pose, able_observe_pose):
             object_list[i].print_object()
         print('----------------------------------------------')
         for i in range(able_observe_pose, size):
@@ -195,7 +204,7 @@ def multi_object_recog_2():
         print('----------------------------------------------')
 
         rospy.loginfo("multi_object_recog_2 finish")
-        return able_observe_pose, size, object_list
+        return overlap_pose, able_observe_pose, size, object_list
     rospy.loginfo("multi_object_recog_2 finish")
 
 
@@ -209,7 +218,7 @@ def use_hand_to_grip_3(gripper, pre_position, grip_method, need_judge='no'):  # 
     robot.baxter_ik_move(gripper, pre_position, offset=offset, tag='taskA')
     print("move to workpiece top end")
 
-    # client.wait_for_service()
+    client.wait_for_service()
     request = ImageProcSrvRequest()
     if (gripper == 'left'):
         if (grip_method == 0):
@@ -280,6 +289,72 @@ def use_hand_to_grip_3(gripper, pre_position, grip_method, need_judge='no'):  # 
     # except Exception:
     #     rospy.loginfo("use_hand_to_grip_3 error")
 
+def use_hand_to_grip_overlap_3(gripper, pre_position, grip_method, need_judge='no'):  # gripper: 'left'/'right'
+    rospy.loginfo("use_hand_to_grip_3 start")
+    robot.baxter_ik_move(gripper, pre_position, offset=offset, tag='taskA')
+    print("move to workpiece top end")
+
+    client.wait_for_service()
+    request = ImageProcSrvRequest()
+    if (gripper == 'left'):
+        request.method = 16
+        frame = left_frame
+    else:
+        request.method = 17
+        frame = right_frame
+
+
+    response = client.call(request)
+    print("precision localization")
+    # try:
+    if isinstance(response, ImageProcSrvResponse):
+        theta = response.object[0].orientation[0]
+        # print(theta)
+        # print(robot.get_joint())
+        if grip_method == 1 and need_judge:
+            theta = (theta + 90) % 180
+        if theta == 0:
+            theta = 180
+        rotate_theta = robot.cal_gripper_theta(theta, gripper)
+
+        position = np.asarray(response.object[0].position) / 1000
+        position = np.append(position, 1)
+
+        base_marker = lookupTransform(tf_listener, frame, '/base')
+        trans_baxter, rot, rot_euler = getTfFromMatrix(np.linalg.inv(base_marker))
+        translation_matrix = robot.quaternion_to_trans_matrix(rot[0], rot[1], rot[2], rot[3],
+                                                              trans_baxter[0], trans_baxter[1], trans_baxter[2])
+
+        base_tf = np.dot(translation_matrix, position)[0:3]
+        base_tf += hand_offset
+        # print(base_tf)
+        robot.baxter_ik_move(gripper, base_tf, tag='taskB', joint_w2_move='yes', joint_w2=rotate_theta)
+
+        # # get current end-joint's eular
+        # quaternion = np.asarray(limb.endpoint_pose()["orientation"])
+        # eular = np.asarray(
+        #     tf.transformations.euler_from_quaternion([quaternion[0], quaternion[1], quaternion[2], quaternion[3]]))
+
+        base_tf[2] = -0.12 #-0.133  # Large gripper
+        # base_tf[2] = -0.183  # Small gripper
+        if(grip_method == 0):
+            base_tf[2] -= 0.022
+        if(gripper == 'left'):
+            base_tf[2] -= 0.005
+
+        # print(base_tf)
+
+        robot.baxter_ik_move(gripper, base_tf, joint_w2_move='yes', joint_w2=rotate_theta)
+        # robot.baxter_ik_move(gripper, base_tf, eular)
+        robot.gripper_control(gripper, 0)
+        # exit(0)
+
+        time.sleep(0.5)
+        base_tf[2] = 0
+        robot.baxter_ik_move(gripper, base_tf)
+        rospy.loginfo("use_hand_to_grip_3 finish")
+    # except Exception:
+    #     rospy.loginfo("use_hand_to_grip_3 error")
 
 ########################################################################################################################
 # 4 exchange gripper if need
@@ -319,7 +394,7 @@ def exchange_gripper_4(direction, method, classify):  # direction: left2right/ri
             receive_gripper = right_vertical
             if classify == 2:
                 receive_gripper = right_base
-                receive_gripper[1] += 0.035
+                receive_gripper[1] += 0.035 # receive_gripper_prepare_distance
         else:
             receive_gripper = right_horizontal
 
@@ -386,7 +461,8 @@ def exchange_gripper_4(direction, method, classify):  # direction: left2right/ri
 
     position[2] += 0.1
     robot.baxter_ik_move(receive, position, eular)
-    time.sleep(0.2)
+    # time.sleep(0.2)
+    t2.join()
     rospy.loginfo("exchange_gripper_4 finish")
 
 
@@ -474,8 +550,8 @@ def move_to_put_place_6(gripper, classify, grip_method):
     print("classify: ", remapped_classify, "place id: ", idx, "gripper to the position: ", put_place)
     try:
         position = np.array([put_place[0], put_place[1], put_place[2]])
-        eular = np.asarray(
-            tf.transformations.euler_from_quaternion([put_place[3], put_place[4], put_place[5], put_place[6]]))
+        # eular = np.asarray(
+        #     tf.transformations.euler_from_quaternion([put_place[3], put_place[4], put_place[5], put_place[6]]))
         orientation = [put_place[3], put_place[4], put_place[5], put_place[6]]
 
         preset_height = 0.10
@@ -558,21 +634,22 @@ def observe_at_the_position_5(gripper):
 
     if (back == 'left'):
         back_observation = left_base
-        left_base[1] += 0.1
+        left_base[1] += 0.2
     else:
         back_observation = right_base
-        right_base[1] -= 0.1
+        right_base[1] -= 0.2
 
-    t1 = threading.Thread(target=robot.baxter_ik_move, args=(back, back_observation[0:3], back_observation[3:7]))
-    t1.start()
-    t1.join()
+    # t1 = threading.Thread(target=robot.baxter_ik_move, args=(back, back_observation[0:3], back_observation[3:7]))
+    # t1.start()
+    # t1.join()
+    robot.baxter_ik_move(back, back_observation[0:3], back_observation[3:7])
 
     return classify
 
 
 ########################################################################################################################
 safe_area = 0.06
-middle_pos = 2
+# middle_pos = 2
 
 
 def gripper_judge(x, y, classify):
@@ -596,7 +673,7 @@ def gripper_judge(x, y, classify):
 def taskA():
     go_to_initial_pose_1()
     # save_img()
-    able_observe_pose, size, object_list = multi_object_recog_2()
+    overlap_pose, able_observe_pose, size, object_list = multi_object_recog_2()
 
     for i in range(able_observe_pose, size):
         print("-----------------PICK ABLE TO SEE START-----------------")
@@ -613,7 +690,7 @@ def taskA():
         move_to_put_place_6(gripper, gripper_task.classify, gripper_task.grip_method)
         print("------------------PICK ABLE TO SEE END------------------")
 
-    for i in range(able_observe_pose):
+    for i in range(overlap_pose, able_observe_pose):
         print("----------------PICK UNABLE TO SEE START----------------")
 
         gripper_task = object_list[i]
@@ -626,12 +703,34 @@ def taskA():
         #     use_hand_to_grip_3(gripper, gripper_task.position, gripper_task.grip_method, need_judge='yes')
         # else:
         # robot.baxter_ik_move(gripper, gripper_task.position, offset=offset, tag='taskA')
+
         use_hand_to_grip_3(gripper, gripper_task.position, gripper_task.grip_method)
         gripper_task.classify = observe_at_the_position_5(gripper)
         move_to_put_place_6(gripper, gripper_task.classify, gripper_task.grip_method)
 
         print("-----------------PICK UNABLE TO SEE END-----------------")
 
+    cnt = 0
+
+    # pick overlap
+    for i in range(overlap_pose):
+        cnt += 1
+        gripper_task = object_list[i]
+        if (gripper_task.position[1] < 0):
+            gripper = 'right'
+        else:
+            gripper = 'left'
+
+        use_hand_to_grip_overlap_3(gripper, gripper_task.position, gripper_task.grip_method)
+        gripper_task.classify = observe_at_the_position_5(gripper)
+        move_to_put_place_6(gripper, gripper_task.classify, gripper_task.grip_method)
+
+        use_hand_to_grip_3(gripper, gripper_task.position, gripper_task.grip_method)
+        gripper_task.classify = observe_at_the_position_5(gripper)
+        move_to_put_place_6(gripper, gripper_task.classify, gripper_task.grip_method)
+
+        if cnt == 1:
+            break
 
 ########################################################################################################################
 ########################################################################################################################
@@ -668,11 +767,11 @@ def area_detect(gripper, step):
 
 ########################################################################################################################
 # main task
-# save_img()
+#save_img()
 
 
 
-taskA()
+# taskA()
 
 
 # print(robot.get_joint())
@@ -686,7 +785,7 @@ taskA()
 # go_to_observe_position('left')
 
 
-# print(robot.get_joint())
+print(robot.get_joint())
 
 
 # save_img()

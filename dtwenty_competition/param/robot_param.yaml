@@ -1,0 +1,19 @@
+taskA:
+	task_a_b_height: -0.038
+	task_c_height: 0.040
+	use_hand_to_grip:
+		longer_gripper_grip_height: -0.12
+		shorter_gripper_grip_height: -0.183
+		grip_method_0_down: 0.022
+		grip_left_down: 0.005
+	exchange_gripper:
+		receive_gripper_prepare_offset: 0.035
+		receive_gripper_finish_offset: 0.1
+		give_gripper_back_offset: 0.2
+
+taskB:
+  use_hand_to_grip:
+	use_hand_to_grip_from_put_place:
+		longer_gripper_grip_height: -0.125
+    grip_method_0_down: 0.022
+		grip_left_down: 0.005
